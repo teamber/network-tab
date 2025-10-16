@@ -70,8 +70,8 @@
     .section-header .actions button[disabled] { opacity: .5; cursor: not-allowed; }
     /* Subheader (titre + actions) pour les sections Payload/Response */
     .section-subheader {
-      display: flex; align-items: center; justify-content: space-between; gap: 8px;
-      margin: 6px 0;
+      display: flex; align-items: center; justify-content: space-between; gap: 10px;
+      margin: 10px 0;
     }
     .section-subheader .actions button {
       background: #2a2b31; color: var(--text); border: 1px solid var(--border);
@@ -85,7 +85,7 @@
       padding: 6px 8px; z-index: 1;
     }
     thead th.sortable { cursor: pointer; }
-    tbody td { padding: 4px 8px; border-bottom: 1px solid #2a2a2f; }
+    tbody td { padding: 6px 8px; border-bottom: 1px solid #2a2a2f; }
     tbody tr { height: var(--row-height); }
     tbody tr:hover { background: var(--bg-hover); }
     tbody tr.selected { background: #2b3340; box-shadow: inset 0 0 0 1px #3a4a5f; }
@@ -97,11 +97,11 @@
     .col-size, .col-initiator, .col-file { color: var(--muted); }
         .col-file { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-    .section { margin-bottom: 12px; }
-    .section h3 { margin: 8px 0 6px; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+    .section { margin-bottom: 16px; }
+    .section h3 { margin: 10px 0 8px; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
     pre, code, .code {
       background: #15161a; border: 1px solid var(--border); border-radius: 6px;
-      padding: 8px; overflow: auto; color: #dfe6f3;
+      padding: 10px; overflow: auto; color: #dfe6f3;
     }
     /* JSON highlight */
     .code.json { max-height: 260px; overflow: auto; }
@@ -111,10 +111,10 @@
     .json-boolean { color: #4fc1ff; }
     .json-null { color: #c586c0; }
     /* Inline row for method/status/duration */
-    .inline-triplet { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
-    .inline-triplet .chip { background: #15161a; border: 1px solid var(--border); border-radius: 6px; padding: 8px; color: #dfe6f3; }
-    .kv { display: grid; grid-template-columns: 200px 1fr; gap: 6px 12px; }
-    .detail-item { margin: 10px 0; }
+    .inline-triplet { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+    .inline-triplet .chip { background: #15161a; border: 1px solid var(--border); border-radius: 6px; padding: 10px; color: #dfe6f3; }
+    .kv { display: grid; grid-template-columns: 200px 1fr; gap: 8px 14px; }
+    .detail-item { margin: 14px 0; }
     .detail-key { color: var(--muted); font-weight: 600; margin-bottom: 4px; }
     .muted { color: var(--muted); }
 
@@ -130,6 +130,28 @@
     .toast {
       position: fixed; right: 12px; bottom: 12px; background: #222b22; border: 1px solid #375a37; color: #d9f4d9;
       padding: 8px 12px; border-radius: 8px; box-shadow: 0 6px 18px var(--shadow); display: none; z-index: 10000;
+    }
+    /* Responsive: side-by-side layout for wide screens */
+    @media (min-width: 1024px) {
+      .split {
+        grid-template-rows: 1fr !important;
+        grid-template-columns: var(--sidebar-w) 6px 1fr;
+      }
+      .list-section {
+        border-bottom: none;
+        border-right: 1px solid var(--border);
+      }
+      .row-resizer {
+        cursor: col-resize;
+        border-top: none;
+        border-bottom: none;
+        border-left: 1px solid var(--border);
+        border-right: 1px solid var(--border);
+      }
+      .row-resizer::after {
+        width: 3px;
+        height: 60px;
+      }
     }
   </style>
 </head>
@@ -165,6 +187,7 @@
           <button id="btnCopy" data-action="copy" disabled>📋 Copier</button>
           <button id="btnCopyToken" data-action="copy-token" disabled>🔐 Copier avec token</button>
           <button id="btnCopyPayload" data-action="copy-payload" disabled>📦 Copier payload</button>
+          <button id="btnCopyNoResp" data-action="copy-no-response" disabled>📋 Copier sans réponse</button>
           <button id="btnCopyResponse" data-action="copy-response" disabled>🧾 Copier réponse</button>
         </div>
       </div>

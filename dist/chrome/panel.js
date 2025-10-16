@@ -323,7 +323,15 @@
 
   function detailsHeaderHtml(disabled) {
     const dis = disabled ? 'disabled' : '';
-    return `<div class=\"section-header details-header\">\n      <div class=\"actions\">\n        <button id=\"btnCopy\" data-action=\"copy\" ${dis}>📋 Copier</button>\n        <button id=\"btnCopyToken\" data-action=\"copy-token\" ${dis}>🔐 Copier avec token</button>\n        <button id=\"btnCopyPayload\" data-action=\"copy-payload\" ${dis}>📦 Copier payload</button>\n        <button id=\"btnCopyResponse\" data-action=\"copy-response\" ${dis}>🧾 Copier réponse</button>\n      </div>\n    </div>`;
+    return `<div class="section-header details-header">
+      <div class="actions">
+        <button id="btnCopy" data-action="copy" ${dis}>📋 Copier</button>
+        <button id="btnCopyToken" data-action="copy-token" ${dis}>🔐 Copier avec token</button>
+        <button id="btnCopyPayload" data-action="copy-payload" ${dis}>📦 Copier payload</button>
+        <button id="btnCopyNoResp" data-action="copy-no-response" ${dis}>📋 Copier sans réponse</button>
+        <button id="btnCopyResponse" data-action="copy-response" ${dis}>🧾 Copier réponse</button>
+      </div>
+    </div>`;
   }
 
   function renderDetails() {
@@ -502,7 +510,7 @@
     return { text: null, encoding: null, error: 'timeout-or-error' };
   }
 
-  async function buildCopiedText(entry, withToken) {
+  async function buildCopiedText(entry, withToken, opts = {}) {
     // Assurer payload
     let payload = '';
     try {
@@ -563,14 +571,16 @@
       parts.push('────────────────────────────────────────────');
     }
     parts.push('📦 PAYLOAD:');
-    parts.push('```json');
+    parts.push('```');
     parts.push(payload || '');
     parts.push('```');
     parts.push('');
-    parts.push('🧾 RESPONSE:');
-    parts.push('```json');
-    parts.push(responseText || '');
-    parts.push('```');
+    if (!(opts && opts.includeResponse === false)) {
+      parts.push('🧾 RESPONSE:');
+      parts.push('```');
+      parts.push(responseText || '');
+      parts.push('```');
+    }
 
     return parts.join('\n');
   }
@@ -673,7 +683,21 @@
     }
   }
 
-  async function handleCopyResponse() {
+  async function handleCopyNoResponse() {
+      const entry = state.entries.find(x => x.id === state.selectedId);
+      if (!entry) return;
+      try {
+        const text = await buildCopiedText(entry, false, { includeResponse: false });
+        const ok = await copyTextToClipboard(text);
+        if (ok) showToast('Teamber — Copié (sans réponse) ✓', true);
+        else showToast('Échec de la copie', false);
+      } catch (e) {
+        console.error('[Teamber Réseau] Erreur copie (sans réponse):', e);
+        showToast('Échec de la copie', false);
+      }
+    }
+
+    async function handleCopyResponse() {
     const entry = state.entries.find(x => x.id === state.selectedId);
     if (!entry) return;
     try {
@@ -701,6 +725,7 @@
     if (action === 'copy') handleCopy(false);
     if (action === 'copy-token') handleCopy(true);
     if (action === 'copy-payload') handleCopyPayload();
+    if (action === 'copy-no-response') handleCopyNoResponse();
     if (action === 'copy-response') handleCopyResponse();
   });
 

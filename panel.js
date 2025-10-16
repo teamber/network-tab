@@ -349,7 +349,16 @@
 
   function detailsHeaderHtml(disabled) {
     const dis = disabled ? 'disabled' : '';
-    return `<div class=\"section-header details-header\">\n      <div class=\"title\" style=\"font-weight:700; letter-spacing:.04em; color: var(--muted);\">Détails de la requête</div>\n      <div class=\"actions\">\n        <button id=\"btnCopy\" data-action=\"copy\" ${dis}>📋 Copier</button>\n        <button id=\"btnCopyToken\" data-action=\"copy-token\" ${dis}>🔐 Copier avec token</button>\n        <button id=\"btnCopyPayload\" data-action=\"copy-payload\" ${dis}>📦 Copier payload</button>\n        <button id=\"btnCopyResponse\" data-action=\"copy-response\" ${dis}>🧾 Copier réponse</button>\n      </div>\n    </div>`;
+    return `<div class="section-header details-header">
+      <div class="title" style="font-weight:700; letter-spacing:.04em; color: var(--muted);">🐝</div>
+      <div class="actions">
+        <button id="btnCopy" data-action="copy" ${dis}>📋 Copier</button>
+        <button id="btnCopyToken" data-action="copy-token" ${dis}>🔐 Copier avec token</button>
+        <button id="btnCopyPayload" data-action="copy-payload" ${dis}>📦 Copier payload</button>
+        <button id="btnCopyNoResp" data-action="copy-no-response" ${dis}>📋 Copier sans réponse</button>
+        <button id="btnCopyResponse" data-action="copy-response" ${dis}>🧾 Copier réponse</button>
+      </div>
+    </div>`;
   }
 
   function renderDetails() {
@@ -541,7 +550,7 @@
     return { text: null, encoding: null, error: 'timeout-or-error' };
   }
 
-  async function buildCopiedText(entry, withToken) {
+  async function buildCopiedText(entry, withToken, opts = {}) {
     // Assurer payload brut
     let payloadRaw = '';
     try {
@@ -596,7 +605,8 @@
 
     // Construction du texte: n'inclure Payload/Response que si JSON non vide
     const parts = [];
-    parts.push(`⚠️ 🔴 **ERREUR**`);
+    const isError = (Number(status) >= 400);
+    parts.push(isError ? `⚠️ 🔴 **ERREUR**` : `✅ 🟢 **SUCCÈS**`);
     parts.push('────────────────────────────────────────────');
     parts.push(`🔗 URL       : ${url}`);
     parts.push(`🚀 MÉTHODE   : ${method}    •    🧭 STATUT : ${status}    •    ⏱ DURÉE : ${duration}`);
@@ -606,20 +616,21 @@
     }
 
     const includePayload = !!payloadJson;
-    const includeResponse = !!responseJson;
+    const wantResponse = opts && Object.prototype.hasOwnProperty.call(opts, 'includeResponse') ? !!opts.includeResponse : true;
+    const includeResponse = wantResponse && !!responseJson;
 
     if (includePayload || includeResponse) {
       parts.push('────────────────────────────────────────────');
       if (includePayload) {
         parts.push('📦 PAYLOAD:');
-        parts.push('```json');
+        parts.push('```');
         parts.push(payloadJson);
         parts.push('```');
       }
       if (includeResponse) {
         if (includePayload) parts.push('');
         parts.push('🧾 RESPONSE:');
-        parts.push('```json');
+        parts.push('```');
         parts.push(responseJson);
         parts.push('```');
       }
@@ -726,7 +737,21 @@
     }
   }
 
-  async function handleCopyResponse() {
+  async function handleCopyNoResponse() {
+      const entry = state.entries.find(x => x.id === state.selectedId);
+      if (!entry) return;
+      try {
+        const text = await buildCopiedText(entry, false, { includeResponse: false });
+        const ok = await copyTextToClipboard(text);
+        if (ok) showToast('Teamber — Copié (sans réponse) ✓', true);
+        else showToast('Échec de la copie', false);
+      } catch (e) {
+        console.error('[Teamber Réseau] Erreur copie (sans réponse):', e);
+        showToast('Échec de la copie', false);
+      }
+    }
+
+    async function handleCopyResponse() {
     const entry = state.entries.find(x => x.id === state.selectedId);
     if (!entry) return;
     try {
@@ -754,6 +779,7 @@
     if (action === 'copy') handleCopy(false);
     if (action === 'copy-token') handleCopy(true);
     if (action === 'copy-payload') handleCopyPayload();
+    if (action === 'copy-no-response') handleCopyNoResponse();
     if (action === 'copy-response') handleCopyResponse();
   });
 
