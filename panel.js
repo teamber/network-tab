@@ -142,6 +142,18 @@
     }
   }
 
+  // Renvoie true si la chaîne est un JSON non vide parsable ({ ... } ou [ ... ])
+  function hasParsableJson(str) {
+    try {
+      const t = String(str == null ? '' : str).trim();
+      if (!t) return false;
+      const first = t[0];
+      if (first !== '{' && first !== '[') return false;
+      JSON.parse(t);
+      return true;
+    } catch { return false; }
+  }
+
   function extractToken(headersMap) {
     // Recherche dans Authorization, X-Access-Token, Token, X-Auth-Token
     const auth = headersMap['authorization'];
@@ -337,7 +349,7 @@
 
   function detailsHeaderHtml(disabled) {
     const dis = disabled ? 'disabled' : '';
-    return `<div class=\"section-header details-header\">\n      <div class=\"actions\">\n        <button id=\"btnCopy\" data-action=\"copy\" ${dis}>📋 Copier</button>\n        <button id=\"btnCopyToken\" data-action=\"copy-token\" ${dis}>🔐 Copier avec token</button>\n        <button id=\"btnCopyPayload\" data-action=\"copy-payload\" ${dis}>📦 Copier payload</button>\n        <button id=\"btnCopyResponse\" data-action=\"copy-response\" ${dis}>🧾 Copier réponse</button>\n      </div>\n    </div>`;
+    return `<div class=\"section-header details-header\">\n      <div class=\"title\" style=\"font-weight:700; letter-spacing:.04em; color: var(--muted);\">Détails de la requête</div>\n      <div class=\"actions\">\n        <button id=\"btnCopy\" data-action=\"copy\" ${dis}>📋 Copier</button>\n        <button id=\"btnCopyToken\" data-action=\"copy-token\" ${dis}>🔐 Copier avec token</button>\n        <button id=\"btnCopyPayload\" data-action=\"copy-payload\" ${dis}>📦 Copier payload</button>\n        <button id=\"btnCopyResponse\" data-action=\"copy-response\" ${dis}>🧾 Copier réponse</button>\n      </div>\n    </div>`;
   }
 
   function renderDetails() {
@@ -360,12 +372,14 @@
       const pd = e.request && e.request.postData;
       payloadRaw = (pd && (pd.text || (pd.params && JSON.stringify(pd.params)))) || '';
     } catch (_) {}
-    const payloadPretty = prettyMaybeJson(payloadRaw);
-    const payloadHtml = highlightJson(safeTruncate(payloadPretty || '', MAX_BODY_CHARS));
+    const hasPayloadJson = hasParsableJson(payloadRaw);
+    const payloadPretty = hasPayloadJson ? prettyMaybeJson(payloadRaw) : '';
+    const payloadHtml = hasPayloadJson ? highlightJson(safeTruncate(payloadPretty || '', MAX_BODY_CHARS)) : '<div class="muted">(aucun JSON)</div>';
 
     const respRaw = (e.response && e.response.content && e.response.content.text);
-    const responsePretty = prettyMaybeJson(respRaw != null ? respRaw : '<empty or binary>');
-    const responseHtml = highlightJson(safeTruncate(responsePretty || '', MAX_BODY_CHARS));
+    const hasRespJson = hasParsableJson(respRaw);
+    const responsePretty = hasRespJson ? prettyMaybeJson(respRaw) : '';
+    const responseHtml = hasRespJson ? highlightJson(safeTruncate(responsePretty || '', MAX_BODY_CHARS)) : '<div class="muted">(aucun JSON)</div>';
 
     $details.innerHTML = `
       ${detailsHeaderHtml(false)}
@@ -382,11 +396,11 @@
       </div>
 
       <div class=\"section\">
-        <div class=\"section-subheader\">\n          <h3>Payload</h3>\n          <div class=\"actions\">\n            <button data-action=\"copy-payload\">📦 Copier payload</button>\n          </div>\n        </div>
+        <div class=\"section-subheader\">\n          <h3>Payload</h3>\n          <div class=\"actions\">\n            <button id=\"subCopyPayload\" data-action=\"copy-payload\" ${hasPayloadJson ? '' : 'disabled'}>📦 Copier payload</button>\n          </div>\n        </div>
         <pre class=\"code json\">${payloadHtml}</pre>
       </div>
       <div class=\"section\">
-        <div class=\"section-subheader\">\n          <h3>Response</h3>\n          <div class=\"actions\">\n            <button data-action=\"copy-response\">🧾 Copier réponse</button>\n          </div>\n        </div>
+        <div class=\"section-subheader\">\n          <h3>Response</h3>\n          <div class=\"actions\">\n            <button id=\"subCopyResponse\" data-action=\"copy-response\" ${hasRespJson ? '' : 'disabled'}>🧾 Copier réponse</button>\n          </div>\n        </div>
         <pre id=\"respPre\" class=\"code json\">${responseHtml}</pre>
       </div>
 
@@ -400,6 +414,12 @@
       </div>
     `;
 
+    // Désactiver les boutons correspondants dans l'en-tête principal
+    const btnCopyPayload = document.getElementById('btnCopyPayload');
+    const btnCopyResponse = document.getElementById('btnCopyResponse');
+    if (btnCopyPayload) btnCopyPayload.disabled = !hasPayloadJson;
+    if (btnCopyResponse) btnCopyResponse.disabled = !hasRespJson;
+
     // Lazy load de la réponse pour l'aperçu dans la section détails
     (async () => {
       try {
@@ -409,14 +429,19 @@
         const got = await ensureResponseBody(e, { timeoutMs: 3000 });
         if (state.selectedId !== currentId) return; // la sélection a changé entre-temps
         if (got && typeof got.text === 'string') {
+          const btnTop = document.getElementById('btnCopyResponse');
+          const btnSub = document.getElementById('subCopyResponse');
           let text = got.text;
-          try {
-            const t = text && String(text).trim();
-            if (t && (t.startsWith('{') || t.startsWith('['))) {
-              text = JSON.stringify(JSON.parse(t), null, 2);
-            }
-          } catch {}
-          target.innerHTML = highlightJson(safeTruncate(text || '', MAX_BODY_CHARS));
+          if (hasParsableJson(text)) {
+            try { text = JSON.stringify(JSON.parse(String(text).trim()), null, 2); } catch {}
+            target.innerHTML = highlightJson(safeTruncate(text || '', MAX_BODY_CHARS));
+            if (btnTop) btnTop.disabled = false;
+            if (btnSub) btnSub.disabled = false;
+          } else {
+            target.innerHTML = '<div class="muted">(aucun JSON)</div>';
+            if (btnTop) btnTop.disabled = true;
+            if (btnSub) btnSub.disabled = true;
+          }
         }
       } catch (err) {
         // silencieux; l'aperçu initial restera basé sur HAR si disponible
@@ -517,39 +542,43 @@
   }
 
   async function buildCopiedText(entry, withToken) {
-    // Assurer payload
-    let payload = '';
+    // Assurer payload brut
+    let payloadRaw = '';
     try {
       const pd = entry.request && entry.request.postData;
-      payload = (pd && (pd.text || (pd.params && JSON.stringify(pd.params)))) || '';
+      payloadRaw = (pd && (pd.text || (pd.params && JSON.stringify(pd.params)))) || '';
     } catch {}
 
-    payload = safeTruncate(payload, MAX_BODY_CHARS);
+    // Préparer payload JSON si parsable
+    let payloadJson = '';
+    if (hasParsableJson(payloadRaw)) {
+      try { payloadJson = JSON.stringify(JSON.parse(String(payloadRaw).trim()), null, 2); } catch {}
+      payloadJson = safeTruncate(payloadJson, MAX_BODY_CHARS);
+    }
 
     // Assurer response body via getContent
-    let responseText = '';
+    let responseRaw = '';
     try {
       const got = await ensureResponseBody(entry);
       if (got && typeof got.text === 'string') {
-        responseText = got.text;
-        // formatage JSON lisible si applicable
-        try {
-          if (responseText && responseText.trim().startsWith('{')) {
-            responseText = JSON.stringify(JSON.parse(responseText), null, 2);
-          }
-        } catch {}
+        responseRaw = got.text;
       } else if (got && got.timeout) {
-        responseText = '<unable to read response: timeout>';
+        responseRaw = '';// considérer comme vide pour la copie globale
       } else {
         // fallback si déjà présent dans HAR
         const harText = entry.response && entry.response.content && entry.response.content.text;
-        responseText = (harText != null) ? harText : '<unable to read response>';
+        responseRaw = (harText != null) ? harText : '';
       }
     } catch (e) {
-      responseText = '<unable to read response>';
+      responseRaw = '';
     }
 
-    responseText = safeTruncate(responseText || '', MAX_BODY_CHARS);
+    // Préparer réponse JSON si parsable
+    let responseJson = '';
+    if (hasParsableJson(responseRaw)) {
+      try { responseJson = JSON.stringify(JSON.parse(String(responseRaw).trim()), null, 2); } catch {}
+      responseJson = safeTruncate(responseJson || '', MAX_BODY_CHARS);
+    }
 
     // Token seulement si demandé
     let tokenLine = '';
@@ -565,26 +594,36 @@
     const method = entry.method || '';
     const url = entry.url || '';
 
-    // Construction du texte exactement comme demandé
+    // Construction du texte: n'inclure Payload/Response que si JSON non vide
     const parts = [];
-    parts.push(`✨ Teamber • Copied at ${ts}`);
+    parts.push(`⚠️ 🔴 **ERREUR**`);
     parts.push('────────────────────────────────────────────');
-    parts.push(`🔗 URL    : ${url}`);
-    parts.push(`🚀 METHOD : ${method}    •    STATUS : ${status}    •    DURATION : ${duration}`);
-    parts.push('────────────────────────────────────────────');
+    parts.push(`🔗 URL       : ${url}`);
+    parts.push(`🚀 MÉTHODE   : ${method}    •    🧭 STATUT : ${status}    •    ⏱ DURÉE : ${duration}`);
     if (withToken) {
-      parts.push(`${tokenLine ? tokenLine.replace(/^\n/, '') : '— Aucun —'}`);
       parts.push('────────────────────────────────────────────');
+      parts.push(`${tokenLine ? tokenLine.replace(/^\n/, '') : '— Aucun —'}`);
     }
-    parts.push('📦 PAYLOAD:');
-    parts.push('```json');
-    parts.push(payload || '');
-    parts.push('```');
-    parts.push('');
-    parts.push('🧾 RESPONSE:');
-    parts.push('```json');
-    parts.push(responseText || '');
-    parts.push('```');
+
+    const includePayload = !!payloadJson;
+    const includeResponse = !!responseJson;
+
+    if (includePayload || includeResponse) {
+      parts.push('────────────────────────────────────────────');
+      if (includePayload) {
+        parts.push('📦 PAYLOAD:');
+        parts.push('```json');
+        parts.push(payloadJson);
+        parts.push('```');
+      }
+      if (includeResponse) {
+        if (includePayload) parts.push('');
+        parts.push('🧾 RESPONSE:');
+        parts.push('```json');
+        parts.push(responseJson);
+        parts.push('```');
+      }
+    }
 
     return parts.join('\n');
   }
