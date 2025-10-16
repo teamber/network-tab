@@ -2,12 +2,27 @@
 
 Panneau DevTools qui clone l’onglet Réseau et ajoute des actions de copie modernes (avec ou sans token). Pensé pour un usage quotidien en debug: filtre, tri, menu contextuel, copie formatée, et détails complets.
 
-## Installation (temporaire)
+## Installation (Firefox, temporaire)
 1. Ouvrez `about:debugging#/runtime/this-firefox` dans Firefox.
-2. Cliquez « Load Temporary Add-on » et sélectionnez le fichier `manifest.json` de ce dossier.
+2. Cliquez « Load Temporary Add-on » et sélectionnez le fichier `manifest.json` de ce dossier (Manifest V2).
 3. Ouvrez les DevTools (F12) puis l’onglet « Teamber Réseau ».
 
 Note: Manifest V2, add-on temporaire non persisté au redémarrage (il faudra le recharger au prochain lancement de Firefox).
+
+## Installation (Chrome)
+Chrome ne supporte plus Manifest V2 pour les extensions grand public. Si vous chargez ce projet tel quel, vous verrez l’erreur « Impossible d'installer l'extension, car elle utilise une version de fichier manifeste non compatible ». Pour Chrome, utilisez le manifest MV3 fourni.
+
+Deux options:
+- Développement (recommandé):
+  1) Ouvrez `chrome://extensions`, activez « Mode développeur ».
+  2) Cliquez « Charger l'extension non empaquetée » (Load unpacked).
+  3) Sélectionnez le dossier du projet après avoir renommé/copier `manifest.chrome.json` → `manifest.json` (ou remplacez temporairement le fichier `manifest.json`).
+
+- Empaquetage CRX:
+  1) Dupliquez `manifest.chrome.json` en `manifest.json` dans un dossier de build (ou renommez directement dans une copie du projet).
+  2) Zipez le dossier et empaquetez via `chrome://extensions` → « Pack extension ».
+
+Remarque: `devtools_page` est supporté en MV3. Les permissions demandées sont minimales ("devtools", "clipboardWrite"). Le code du panneau est compatible Chrome/Firefox grâce à la détection `browser`/`chrome`. 
 
 ## Utilisation rapide
 - Regénérez des requêtes (recharger la page) pour alimenter la liste.
