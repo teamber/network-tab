@@ -350,7 +350,7 @@
   function detailsHeaderHtml(disabled) {
     const dis = disabled ? 'disabled' : '';
     return `<div class="section-header details-header">
-      <div class="title" style="font-weight:700; letter-spacing:.04em; color: var(--muted);">Détails de la requête</div>
+      <div class="title" style="font-weight:700; letter-spacing:.04em; color: var(--muted);">🐝</div>
       <div class="actions">
         <button id="btnCopy" data-action="copy" ${dis}>📋 Copier</button>
         <button id="btnCopyToken" data-action="copy-token" ${dis}>🔐 Copier avec token</button>
