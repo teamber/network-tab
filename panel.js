@@ -128,6 +128,20 @@
     } catch { return '—'; }
   }
 
+  // Détermine si la requête est de type XHR/fetch (à exclure de l'affichage des "vrais" appels)
+  function isXhrOrFetch(raw) {
+    try {
+      const t = (raw && raw.cause && raw.cause.type)
+        || (raw && raw.initiator && raw.initiator.type)
+        || (raw && raw._initiator && raw._initiator.type)
+        || '';
+      const type = String(t || '').toLowerCase();
+      return type === 'xhr' || type === 'xmlhttprequest' || type === 'fetch';
+    } catch {
+      return false;
+    }
+  }
+
   function extractToken(headersMap) {
     // Recherche dans Authorization, X-Access-Token, Token, X-Auth-Token
     const auth = headersMap['authorization'];
@@ -233,8 +247,8 @@
     let base = !f ? state.entries.slice() : state.entries.filter(e => {
       return (e.url && e.url.toLowerCase().includes(f)) || (e.method && e.method.toLowerCase().includes(f));
     });
-    // Afficher uniquement les entrées avec une taille définie (> 0)
-    base = base.filter(e => getSizeFromResponse(e.response) > 0);
+    // Filtrer: supprimer les XHR/fetch pour n'afficher que les "vrais" appels (documents/ressources)
+    base = base.filter(e => !isXhrOrFetch(e.raw));
 
     // Partition: non-erreurs d'abord, erreurs (>=400) ensuite (toujours en bas)
     const nonErr = [];
