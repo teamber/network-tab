@@ -68,6 +68,16 @@
     }
     .section-header .actions button:hover { background: var(--bg-hover); }
     .section-header .actions button[disabled] { opacity: .5; cursor: not-allowed; }
+    /* Subheader (titre + actions) pour les sections Payload/Response */
+    .section-subheader {
+      display: flex; align-items: center; justify-content: space-between; gap: 8px;
+      margin: 6px 0;
+    }
+    .section-subheader .actions button {
+      background: #2a2b31; color: var(--text); border: 1px solid var(--border);
+      border-radius: 4px; padding: 3px 8px; cursor: pointer; font-size: 12px;
+    }
+    .section-subheader .actions button:hover { background: var(--bg-hover); }
     table { width: 100%; border-collapse: collapse; table-layout: fixed; }
     thead th {
       position: sticky; top: 0; background: var(--bg-elev); color: var(--muted);
@@ -93,6 +103,16 @@
       background: #15161a; border: 1px solid var(--border); border-radius: 6px;
       padding: 8px; overflow: auto; color: #dfe6f3;
     }
+    /* JSON highlight */
+    .code.json { max-height: 260px; overflow: auto; }
+    .json-key { color: #9cdcfe; }
+    .json-string { color: #ce9178; }
+    .json-number { color: #b5cea8; }
+    .json-boolean { color: #4fc1ff; }
+    .json-null { color: #c586c0; }
+    /* Inline row for method/status/duration */
+    .inline-triplet { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+    .inline-triplet .chip { background: #15161a; border: 1px solid var(--border); border-radius: 6px; padding: 8px; color: #dfe6f3; }
     .kv { display: grid; grid-template-columns: 200px 1fr; gap: 6px 12px; }
     .detail-item { margin: 10px 0; }
     .detail-key { color: var(--muted); font-weight: 600; margin-bottom: 4px; }
@@ -142,8 +162,10 @@
     <div class="details" id="details">
       <div class="section-header details-header">
         <div class="actions">
-          <button id="btnCopy" data-action="copy" disabled>📋 Copier</button>
-          <button id="btnCopyToken" data-action="copy-token" disabled>🔐 Copier avec token</button>
+          <button id="btnCopy" data-action="copy" disabled>📋 Tout coupier</button>
+          <button id="btnCopyToken" data-action="copy-token" disabled>🔐 Tout Copier avec token</button>
+          <button id="btnCopyPayload" data-action="copy-payload" disabled>📦 Copier payload</button>
+          <button id="btnCopyResponse" data-action="copy-response" disabled>🧾 Copier réponse</button>
         </div>
       </div>
       <div class="muted" style="padding:8px">Sélectionnez une requête pour voir les détails…</div>

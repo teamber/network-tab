@@ -323,7 +323,7 @@
 
   function detailsHeaderHtml(disabled) {
     const dis = disabled ? 'disabled' : '';
-    return `<div class=\"section-header details-header\">\n      <div class=\"actions\">\n        <button id=\"btnCopy\" data-action=\"copy\" ${dis}>📋 Copier</button>\n        <button id=\"btnCopyToken\" data-action=\"copy-token\" ${dis}>🔐 Copier avec token</button>\n      </div>\n    </div>`;
+    return `<div class=\"section-header details-header\">\n      <div class=\"actions\">\n        <button id=\"btnCopy\" data-action=\"copy\" ${dis}>📋 Copier</button>\n        <button id=\"btnCopyToken\" data-action=\"copy-token\" ${dis}>🔐 Copier avec token</button>\n        <button id=\"btnCopyPayload\" data-action=\"copy-payload\" ${dis}>📦 Copier payload</button>\n        <button id=\"btnCopyResponse\" data-action=\"copy-response\" ${dis}>🧾 Copier réponse</button>\n      </div>\n    </div>`;
   }
 
   function renderDetails() {
@@ -340,13 +340,18 @@
     const reqKv = (reqHeaders||[]).map(h => `<div>${escapeHtml(h.name || '')}</div><div class=\"code\">${escapeHtml(h.value || '')}</div>`).join('');
     const resKv = (resHeaders||[]).map(h => `<div>${escapeHtml(h.name || '')}</div><div class=\"code\">${escapeHtml(h.value || '')}</div>`).join('');
 
-    // Corps requête (peut être volumineux, tronquer visuellement seulement)
-    let payload = '';
+    // Préparer contenu Payload/Response (préttifié JSON + surlignage), sans appel getContent() automatique
+    let payloadRaw = '';
     try {
       const pd = e.request && e.request.postData;
-      const txt = pd && (pd.text || (pd.params && JSON.stringify(pd.params)));
-      payload = safeTruncate(txt || '', MAX_BODY_CHARS);
+      payloadRaw = (pd && (pd.text || (pd.params && JSON.stringify(pd.params)))) || '';
     } catch (_) {}
+    const payloadPretty = prettyMaybeJson(payloadRaw);
+    const payloadHtml = highlightJson(safeTruncate(payloadPretty || '', MAX_BODY_CHARS));
+
+    const respRaw = (e.response && e.response.content && e.response.content.text);
+    const responsePretty = prettyMaybeJson(respRaw != null ? respRaw : '<empty or binary>');
+    const responseHtml = highlightJson(safeTruncate(responsePretty || '', MAX_BODY_CHARS));
 
     $details.innerHTML = `
       ${detailsHeaderHtml(false)}
@@ -355,23 +360,22 @@
           <div class=\"detail-key\">URL</div>
           <pre class=\"code\">${escapeHtml(e.url || '')}</pre>
         </div>
-        <div class=\"detail-item\">
-          <div class=\"detail-key\">MÉTHODE</div>
-          <pre class=\"code\">${escapeHtml(e.method || '')}</pre>
-        </div>
-        <div class=\"detail-item\">
-          <div class=\"detail-key\">STATUT</div>
-          <pre class=\"code\">${escapeHtml(String(e.status || ''))}</pre>
-        </div>
-        <div class=\"detail-item\">
-          <div class=\"detail-key\">DURÉE</div>
-          <pre class=\"code\">${escapeHtml(fmtTime(e.durationMs || 0))}</pre>
-        </div>
-        <div class=\"detail-item\">
-          <div class=\"detail-key\">HEURE</div>
-          <pre class=\"code\">${escapeHtml(e.timeString || '')}</pre>
+        <div class=\"inline-triplet\">
+          <div class=\"chip\"><strong>MÉTHODE</strong><br>${escapeHtml(e.method || '')}</div>
+          <div class=\"chip\"><strong>STATUT</strong><br>${escapeHtml(String(e.status || ''))}</div>
+          <div class=\"chip\"><strong>DURÉE</strong><br>${escapeHtml(fmtTime(e.durationMs || 0))}</div>
         </div>
       </div>
+
+      <div class=\"section\">
+        <div class=\"section-subheader\">\n          <h3>Payload</h3>\n          <div class=\"actions\">\n            <button data-action=\"copy-payload\">📦 Copier payload</button>\n          </div>\n        </div>
+        <pre class=\"code json\">${payloadHtml}</pre>
+      </div>
+      <div class=\"section\">
+        <div class=\"section-subheader\">\n          <h3>Response</h3>\n          <div class=\"actions\">\n            <button data-action=\"copy-response\">🧾 Copier réponse</button>\n          </div>\n        </div>
+        <pre id=\"respPre\" class=\"code json\">${responseHtml}</pre>
+      </div>
+
       <div class=\"section\">
         <h3>Headers (Request)</h3>
         <div class=\"kv\">${reqKv || '<div class=\"muted\">(aucun)</div>'}</div>
@@ -380,11 +384,30 @@
         <h3>Headers (Response)</h3>
         <div class=\"kv\">${resKv || '<div class=\"muted\">(aucun)</div>'}</div>
       </div>
-      <div class=\"section\">
-        <h3>Payload</h3>
-        <pre class=\"code\">${escapeHtml(payload || '')}</pre>
-      </div>
     `;
+
+    // Lazy load de la réponse pour l'aperçu dans la section détails
+    (async () => {
+      try {
+        const currentId = e.id;
+        const target = document.getElementById('respPre');
+        if (!target) return;
+        const got = await ensureResponseBody(e, { timeoutMs: 3000 });
+        if (state.selectedId !== currentId) return; // la sélection a changé entre-temps
+        if (got && typeof got.text === 'string') {
+          let text = got.text;
+          try {
+            const t = text && String(text).trim();
+            if (t && (t.startsWith('{') || t.startsWith('['))) {
+              text = JSON.stringify(JSON.parse(t), null, 2);
+            }
+          } catch {}
+          target.innerHTML = highlightJson(safeTruncate(text || '', MAX_BODY_CHARS));
+        }
+      } catch (err) {
+        // silencieux; l'aperçu initial restera basé sur HAR si disponible
+      }
+    })();
   }
 
   function escapeHtml(s) {
@@ -396,10 +419,44 @@
       .replace(/'/g,'&#039;');
   }
 
-  async function ensureResponseBody(entry) {
+  function prettyMaybeJson(text) {
+    try {
+      if (!text) return '';
+      const t = String(text).trim();
+      if (!t) return '';
+      if (t.startsWith('{') || t.startsWith('[')) {
+        return JSON.stringify(JSON.parse(t), null, 2);
+      }
+      return t;
+    } catch { return String(text); }
+  }
+
+  // Minimal JSON highlighter: escapes HTML then wraps tokens with span classes
+  function highlightJson(input) {
+    try {
+      const jsonStr = typeof input === 'string' ? input : JSON.stringify(input, null, 2);
+      const esc = escapeHtml(jsonStr);
+      return esc
+        // Keys
+        .replace(/(&quot;)([^\n\r\t\f\v\"]*?)(&quot;\s*:)/g, (_m, p1, key, p3) => `<span class="json-string">&quot;</span><span class="json-key">${key}</span><span class="json-string">&quot;</span><span class="json-key">:</span>`)
+        // Strings (values)
+        .replace(/&quot;([^\n\r\t\f\v\"]*?)&quot;/g, '<span class="json-string">&quot;$1&quot;</span>')
+        // Numbers
+        .replace(/\b(-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)\b/g, '<span class="json-number">$1</span>')
+        // Booleans
+        .replace(/\b(true|false)\b/g, '<span class="json-boolean">$1</span>')
+        // Null
+        .replace(/\bnull\b/g, '<span class="json-null">null</span>');
+    } catch (e) {
+      return escapeHtml(String(input||''));
+    }
+  }
+
+  async function ensureResponseBody(entry, opts) {
     // Best-effort: ne pas récupérer à l'avance. Lors de la copie, tenter getContent().
     // Gère les implémentations basées callback (Chrome) et Promise (Firefox).
     const raw = entry.raw;
+    const timeoutMs = (opts && typeof opts.timeoutMs === 'number') ? opts.timeoutMs : GET_CONTENT_TIMEOUT_MS;
     if (!raw || typeof raw.getContent !== 'function') {
       return { text: null, encoding: null, error: 'no-getContent' };
     }
@@ -416,7 +473,7 @@
       // Tentative Promise
       const ret = raw.getContent();
       if (ret && typeof ret.then === 'function') {
-        result = await withTimeout(ret, GET_CONTENT_TIMEOUT_MS);
+        result = await withTimeout(ret, timeoutMs);
         if (result && (result.content || result.text || typeof result === 'string')) {
           // Normaliser divers formats:
           if (typeof result === 'string') return { text: result, encoding: 'utf-8' };
@@ -439,7 +496,7 @@
       }
     });
 
-    result = await withTimeout(cbPromise, GET_CONTENT_TIMEOUT_MS);
+    result = await withTimeout(cbPromise, timeoutMs);
     if (result && (result.text || result.text === '')) return result;
 
     return { text: null, encoding: null, error: 'timeout-or-error' };
@@ -559,6 +616,78 @@
     }
   }
 
+  // Copie uniquement du payload
+  function extractPayload(entry) {
+    try {
+      const pd = entry.request && entry.request.postData;
+      let payload = (pd && (pd.text || (pd.params && JSON.stringify(pd.params)))) || '';
+      // Beautifier JSON si possible
+      try {
+        const t = payload && String(payload).trim();
+        if (t && (t.startsWith('{') || t.startsWith('['))) {
+          payload = JSON.stringify(JSON.parse(t), null, 2);
+        }
+      } catch {}
+      return safeTruncate(payload, MAX_BODY_CHARS);
+    } catch {
+      return '';
+    }
+  }
+
+  async function extractResponse(entry, opts = {}) {
+    const { truncate = true, timeoutMs } = opts;
+    try {
+      const got = await ensureResponseBody(entry, { timeoutMs });
+      let text = '';
+      if (got && typeof got.text === 'string') {
+        text = got.text;
+      } else if (got && got.timeout) {
+        text = '<unable to read response: timeout>';
+      } else {
+        const harText = entry.response && entry.response.content && entry.response.content.text;
+        text = (harText != null) ? harText : '<unable to read response>';
+      }
+      try {
+        const t = text && String(text).trim();
+        if (t && (t.startsWith('{') || t.startsWith('['))) {
+          text = JSON.stringify(JSON.parse(t), null, 2);
+        }
+      } catch {}
+      return truncate ? safeTruncate(text || '', MAX_BODY_CHARS) : (text || '');
+    } catch {
+      return '<unable to read response>';
+    }
+  }
+
+  async function handleCopyPayload() {
+    const entry = state.entries.find(x => x.id === state.selectedId);
+    if (!entry) return;
+    try {
+      const text = extractPayload(entry);
+      const ok = await copyTextToClipboard(text);
+      if (ok) showToast('Teamber — Payload copié ✓', true);
+      else showToast('Échec de la copie', false);
+    } catch (e) {
+      console.error('[Teamber Réseau] Erreur copie payload:', e);
+      showToast('Échec de la copie', false);
+    }
+  }
+
+  async function handleCopyResponse() {
+    const entry = state.entries.find(x => x.id === state.selectedId);
+    if (!entry) return;
+    try {
+      // Pour la copie de la réponse, ne pas tronquer et autoriser un délai plus long
+      const text = await extractResponse(entry, { truncate: false, timeoutMs: 15000 });
+      const ok = await copyTextToClipboard(text);
+      if (ok) showToast('Teamber — Réponse copiée ✓', true);
+      else showToast('Échec de la copie', false);
+    } catch (e) {
+      console.error('[Teamber Réseau] Erreur copie réponse:', e);
+      showToast('Échec de la copie', false);
+    }
+  }
+
   // Événements UI
   $filter.addEventListener('input', (e) => setFilter(e.target.value));
   $clearBtn.addEventListener('click', () => { state.entries = []; clearSelection(); renderRows(); });
@@ -571,6 +700,8 @@
     const action = btn.dataset.action;
     if (action === 'copy') handleCopy(false);
     if (action === 'copy-token') handleCopy(true);
+    if (action === 'copy-payload') handleCopyPayload();
+    if (action === 'copy-response') handleCopyResponse();
   });
 
   // Resizer vertical (entre URL et DETAILS)
