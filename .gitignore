@@ -1,5 +1,4 @@
 *.xpi
 *.crx
 *.pem
-dist/
 *.zip
