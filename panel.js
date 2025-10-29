@@ -637,60 +637,36 @@
     const method = entry.method || '';
     const url = entry.url || '';
 
-    // Construction du texte: format cohérent avec titre + saut de ligne + données
+    // Construction du texte: n'inclure Payload/Response que si JSON non vide
     const parts = [];
     const isError = (Number(status) >= 400);
-
-    // En-tête SUCCÈS/ERREUR
     parts.push(isError ? `⚠️ 🔴 **ERREUR**` : `✅ 🟢 **SUCCÈS**`);
-    parts.push('');
-
-    // URL
-    parts.push('🔗 URL:');
-    parts.push(url);
-    parts.push('');
-
-    // MÉTHODE
-    parts.push('🚀 MÉTHODE:');
-    parts.push(method);
-    parts.push('');
-
-    // STATUT
-    parts.push('🧭 STATUT:');
-    parts.push(String(status));
-    parts.push('');
-
-    // DURÉE
-    parts.push('⏱ DURÉE:');
-    parts.push(duration);
-
-    // TOKEN si demandé
+    parts.push('────────────────────────────────────────────');
+    parts.push(`🔗 URL       : ${url}`);
+    parts.push(`🚀 MÉTHODE   : ${method}    •    🧭 STATUT : ${status}    •    ⏱ DURÉE : ${duration}`);
     if (includeToken) {
-      parts.push('');
-      parts.push('🔑 TOKEN:');
-      const token = tokenLine ? tokenLine.replace(/^\n🔑 TOKEN: /, '') : '— Aucun —';
-      parts.push(token);
+      parts.push('────────────────────────────────────────────');
+      parts.push(`${tokenLine ? tokenLine.replace(/^\n/, '') : '— Aucun —'}`);
     }
 
     const hasPayload = !!payloadJson;
     const hasResponse = !!responseJson;
 
-    // PAYLOAD si disponible
-    if (hasPayload) {
-      parts.push('');
-      parts.push('📦 PAYLOAD:');
-      parts.push('```');
-      parts.push(payloadJson);
-      parts.push('```');
-    }
-
-    // RESPONSE si disponible
-    if (hasResponse) {
-      parts.push('');
-      parts.push('🧾 RESPONSE:');
-      parts.push('```');
-      parts.push(responseJson);
-      parts.push('```');
+    if (hasPayload || hasResponse) {
+      parts.push('────────────────────────────────────────────');
+      if (hasPayload) {
+        parts.push('📦 PAYLOAD:');
+        parts.push('```');
+        parts.push(payloadJson);
+        parts.push('```');
+      }
+      if (hasResponse) {
+        if (hasPayload) parts.push('');
+        parts.push('🧾 RESPONSE:');
+        parts.push('```');
+        parts.push(responseJson);
+        parts.push('```');
+      }
     }
 
     return parts.join('\n');
