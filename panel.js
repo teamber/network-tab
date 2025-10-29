@@ -175,9 +175,9 @@
   function showToast(text, ok=true) {
     $toast.textContent = text;
     $toast.style.display = 'block';
-    $toast.style.background = ok ? '#1f2b1f' : '#2b1f1f';
-    $toast.style.borderColor = ok ? '#315a31' : '#5a3131';
-    setTimeout(() => { $toast.style.display = 'none'; }, 1800);
+    $toast.style.background = ok ? '#3fb950' : '#f85149';
+    $toast.style.color = '#0d1117';
+    setTimeout(() => { $toast.style.display = 'none'; }, 2000);
   }
 
   function closeCtxMenu() { $ctxMenu.style.display = 'none'; }
@@ -350,13 +350,20 @@
   function detailsHeaderHtml(disabled) {
     const dis = disabled ? 'disabled' : '';
     return `<div class="section-header details-header">
-      <div class="title" style="font-weight:700; letter-spacing:.04em; color: var(--muted);">🐝</div>
-      <div class="actions">
-        <button id="btnCopy" data-action="copy" ${dis}>📋 Copier</button>
-        <button id="btnCopyToken" data-action="copy-token" ${dis}>🔐 Copier avec token</button>
-        <button id="btnCopyPayload" data-action="copy-payload" ${dis}>📦 Copier payload</button>
-        <button id="btnCopyNoResp" data-action="copy-no-response" ${dis}>📋 Copier sans réponse</button>
-        <button id="btnCopyResponse" data-action="copy-response" ${dis}>🧾 Copier réponse</button>
+      <div class="copy-options">
+        <div class="checkbox-wrapper">
+          <input type="checkbox" id="chkToken" ${disabled ? 'disabled' : ''}>
+          <label for="chkToken">Token</label>
+        </div>
+        <div class="checkbox-wrapper">
+          <input type="checkbox" id="chkPayload" ${disabled ? 'disabled' : ''} checked>
+          <label for="chkPayload">Payload</label>
+        </div>
+        <div class="checkbox-wrapper">
+          <input type="checkbox" id="chkResponse" ${disabled ? 'disabled' : ''} checked>
+          <label for="chkResponse">Réponse</label>
+        </div>
+        <button id="btnCopyCustom" class="copy-btn" ${dis}>Copier</button>
       </div>
     </div>`;
   }
@@ -364,7 +371,7 @@
   function renderDetails() {
     const e = state.entries.find(x => x.id === state.selectedId);
     if (!e) {
-      $details.innerHTML = detailsHeaderHtml(true) + '<div class=\"muted\" style=\"padding:8px\">Sélectionnez une requête pour voir les détails…</div>';
+      $details.innerHTML = detailsHeaderHtml(true) + '<div class=\"muted\" style=\"padding:12px 14px\">Sélectionnez une requête pour voir les détails…</div>';
       return;
     }
 
@@ -390,66 +397,86 @@
     const responsePretty = hasRespJson ? prettyMaybeJson(respRaw) : '';
     const responseHtml = hasRespJson ? highlightJson(safeTruncate(responsePretty || '', MAX_BODY_CHARS)) : '<div class="muted">(aucun JSON)</div>';
 
+    // Extraire juste le pathname de l'URL
+    let pathname = '';
+    try {
+      const urlObj = new URL(e.url);
+      pathname = urlObj.pathname + urlObj.search;
+    } catch {
+      pathname = e.url || '';
+    }
+
+    const statusClass = (code) => {
+      if (code >= 200 && code < 300) return 'ok';
+      if (code >= 300 && code < 400) return 'warn';
+      if (code >= 400) return 'err';
+      return '';
+    };
+
     $details.innerHTML = `
       ${detailsHeaderHtml(false)}
-      <div class=\"section\">
-        <div class=\"detail-item\">
-          <div class=\"detail-key\">URL</div>
-          <pre class=\"code\">${escapeHtml(e.url || '')}</pre>
+      <div class=\"details-content\">
+        <div class=\"request-summary\">
+          <span class=\"request-summary-url\">${escapeHtml(pathname)}</span>
+          <span class=\"request-summary-method\">${escapeHtml(e.method || '')}</span>
+          <span class=\"request-summary-status ${statusClass(e.status)}\">${escapeHtml(String(e.status || ''))}</span>
+          <span class=\"request-summary-duration\">${escapeHtml(fmtTime(e.durationMs || 0))}</span>
         </div>
-        <div class=\"inline-triplet\">
-          <div class=\"chip\"><strong>MÉTHODE</strong><br>${escapeHtml(e.method || '')}</div>
-          <div class=\"chip\"><strong>STATUT</strong><br>${escapeHtml(String(e.status || ''))}</div>
-          <div class=\"chip\"><strong>DURÉE</strong><br>${escapeHtml(fmtTime(e.durationMs || 0))}</div>
+
+        <div class=\"section\">
+          <div class=\"section-title-wrapper\">
+            <h3>Payload</h3>
+            <button class=\"section-copy-btn\" id=\"btnCopyPayloadInline\" ${hasPayloadJson ? '' : 'disabled'}>📋 Copier</button>
+          </div>
+          <pre class=\"code json\">${payloadHtml}</pre>
         </div>
-      </div>
 
-      <div class=\"section\">
-        <div class=\"section-subheader\">\n          <h3>Payload</h3>\n          <div class=\"actions\">\n            <button id=\"subCopyPayload\" data-action=\"copy-payload\" ${hasPayloadJson ? '' : 'disabled'}>📦 Copier payload</button>\n          </div>\n        </div>
-        <pre class=\"code json\">${payloadHtml}</pre>
-      </div>
-      <div class=\"section\">
-        <div class=\"section-subheader\">\n          <h3>Response</h3>\n          <div class=\"actions\">\n            <button id=\"subCopyResponse\" data-action=\"copy-response\" ${hasRespJson ? '' : 'disabled'}>🧾 Copier réponse</button>\n          </div>\n        </div>
-        <pre id=\"respPre\" class=\"code json\">${responseHtml}</pre>
-      </div>
+        <div class=\"section\">
+          <div class=\"section-title-wrapper\">
+            <h3>Response</h3>
+            <button class=\"section-copy-btn\" id=\"btnCopyResponseInline\" ${hasRespJson ? '' : 'disabled'}>📋 Copier</button>
+          </div>
+          <pre id=\"respPre\" class=\"code json\">${responseHtml}</pre>
+        </div>
 
-      <div class=\"section\">
-        <h3>Headers (Request)</h3>
-        <div class=\"kv\">${reqKv || '<div class=\"muted\">(aucun)</div>'}</div>
-      </div>
-      <div class=\"section\">
-        <h3>Headers (Response)</h3>
-        <div class=\"kv\">${resKv || '<div class=\"muted\">(aucun)</div>'}</div>
+        <div class=\"section\">
+          <div class=\"section-title-wrapper\">
+            <h3>Headers (Request)</h3>
+          </div>
+          <div class=\"code\">
+            ${reqKv ? `<div class=\"kv\">${reqKv}</div>` : '<div class=\"muted\">(aucun)</div>'}
+          </div>
+        </div>
+
+        <div class=\"section\">
+          <div class=\"section-title-wrapper\">
+            <h3>Headers (Response)</h3>
+          </div>
+          <div class=\"code\">
+            ${resKv ? `<div class=\"kv\">${resKv}</div>` : '<div class=\"muted\">(aucun)</div>'}
+          </div>
+        </div>
       </div>
     `;
-
-    // Désactiver les boutons correspondants dans l'en-tête principal
-    const btnCopyPayload = document.getElementById('btnCopyPayload');
-    const btnCopyResponse = document.getElementById('btnCopyResponse');
-    if (btnCopyPayload) btnCopyPayload.disabled = !hasPayloadJson;
-    if (btnCopyResponse) btnCopyResponse.disabled = !hasRespJson;
 
     // Lazy load de la réponse pour l'aperçu dans la section détails
     (async () => {
       try {
         const currentId = e.id;
         const target = document.getElementById('respPre');
+        const btnInline = document.getElementById('btnCopyResponseInline');
         if (!target) return;
         const got = await ensureResponseBody(e, { timeoutMs: 3000 });
         if (state.selectedId !== currentId) return; // la sélection a changé entre-temps
         if (got && typeof got.text === 'string') {
-          const btnTop = document.getElementById('btnCopyResponse');
-          const btnSub = document.getElementById('subCopyResponse');
           let text = got.text;
           if (hasParsableJson(text)) {
             try { text = JSON.stringify(JSON.parse(String(text).trim()), null, 2); } catch {}
             target.innerHTML = highlightJson(safeTruncate(text || '', MAX_BODY_CHARS));
-            if (btnTop) btnTop.disabled = false;
-            if (btnSub) btnSub.disabled = false;
+            if (btnInline) btnInline.disabled = false;
           } else {
             target.innerHTML = '<div class="muted">(aucun JSON)</div>';
-            if (btnTop) btnTop.disabled = true;
-            if (btnSub) btnSub.disabled = true;
+            if (btnInline) btnInline.disabled = true;
           }
         }
       } catch (err) {
@@ -550,7 +577,12 @@
     return { text: null, encoding: null, error: 'timeout-or-error' };
   }
 
-  async function buildCopiedText(entry, withToken, opts = {}) {
+  async function buildCopiedText(entry, opts = {}) {
+    // opts peut contenir: includeToken, includePayload, includeResponse
+    const includeToken = opts.includeToken !== undefined ? opts.includeToken : false;
+    const wantPayload = opts.includePayload !== undefined ? opts.includePayload : true;
+    const wantResponse = opts.includeResponse !== undefined ? opts.includeResponse : true;
+
     // Assurer payload brut
     let payloadRaw = '';
     try {
@@ -558,40 +590,42 @@
       payloadRaw = (pd && (pd.text || (pd.params && JSON.stringify(pd.params)))) || '';
     } catch {}
 
-    // Préparer payload JSON si parsable
+    // Préparer payload JSON si parsable et demandé
     let payloadJson = '';
-    if (hasParsableJson(payloadRaw)) {
+    if (wantPayload && hasParsableJson(payloadRaw)) {
       try { payloadJson = JSON.stringify(JSON.parse(String(payloadRaw).trim()), null, 2); } catch {}
       payloadJson = safeTruncate(payloadJson, MAX_BODY_CHARS);
     }
 
-    // Assurer response body via getContent
+    // Assurer response body via getContent si demandé
     let responseRaw = '';
-    try {
-      const got = await ensureResponseBody(entry);
-      if (got && typeof got.text === 'string') {
-        responseRaw = got.text;
-      } else if (got && got.timeout) {
-        responseRaw = '';// considérer comme vide pour la copie globale
-      } else {
-        // fallback si déjà présent dans HAR
-        const harText = entry.response && entry.response.content && entry.response.content.text;
-        responseRaw = (harText != null) ? harText : '';
+    if (wantResponse) {
+      try {
+        const got = await ensureResponseBody(entry);
+        if (got && typeof got.text === 'string') {
+          responseRaw = got.text;
+        } else if (got && got.timeout) {
+          responseRaw = '';// considérer comme vide pour la copie globale
+        } else {
+          // fallback si déjà présent dans HAR
+          const harText = entry.response && entry.response.content && entry.response.content.text;
+          responseRaw = (harText != null) ? harText : '';
+        }
+      } catch (e) {
+        responseRaw = '';
       }
-    } catch (e) {
-      responseRaw = '';
     }
 
-    // Préparer réponse JSON si parsable
+    // Préparer réponse JSON si parsable et demandé
     let responseJson = '';
-    if (hasParsableJson(responseRaw)) {
+    if (wantResponse && hasParsableJson(responseRaw)) {
       try { responseJson = JSON.stringify(JSON.parse(String(responseRaw).trim()), null, 2); } catch {}
       responseJson = safeTruncate(responseJson || '', MAX_BODY_CHARS);
     }
 
     // Token seulement si demandé
     let tokenLine = '';
-    if (withToken) {
+    if (includeToken) {
       const headersMap = headersArrayToMap(entry.request && entry.request.headers || []);
       const token = extractToken(headersMap);
       tokenLine = `\n🔑 TOKEN: ${token ? token : '— Aucun —'}`;
@@ -603,37 +637,60 @@
     const method = entry.method || '';
     const url = entry.url || '';
 
-    // Construction du texte: n'inclure Payload/Response que si JSON non vide
+    // Construction du texte: format cohérent avec titre + saut de ligne + données
     const parts = [];
     const isError = (Number(status) >= 400);
+
+    // En-tête SUCCÈS/ERREUR
     parts.push(isError ? `⚠️ 🔴 **ERREUR**` : `✅ 🟢 **SUCCÈS**`);
-    parts.push('────────────────────────────────────────────');
-    parts.push(`🔗 URL       : ${url}`);
-    parts.push(`🚀 MÉTHODE   : ${method}    •    🧭 STATUT : ${status}    •    ⏱ DURÉE : ${duration}`);
-    if (withToken) {
-      parts.push('────────────────────────────────────────────');
-      parts.push(`${tokenLine ? tokenLine.replace(/^\n/, '') : '— Aucun —'}`);
+    parts.push('');
+
+    // URL
+    parts.push('🔗 URL:');
+    parts.push(url);
+    parts.push('');
+
+    // MÉTHODE
+    parts.push('🚀 MÉTHODE:');
+    parts.push(method);
+    parts.push('');
+
+    // STATUT
+    parts.push('🧭 STATUT:');
+    parts.push(String(status));
+    parts.push('');
+
+    // DURÉE
+    parts.push('⏱ DURÉE:');
+    parts.push(duration);
+
+    // TOKEN si demandé
+    if (includeToken) {
+      parts.push('');
+      parts.push('🔑 TOKEN:');
+      const token = tokenLine ? tokenLine.replace(/^\n🔑 TOKEN: /, '') : '— Aucun —';
+      parts.push(token);
     }
 
-    const includePayload = !!payloadJson;
-    const wantResponse = opts && Object.prototype.hasOwnProperty.call(opts, 'includeResponse') ? !!opts.includeResponse : true;
-    const includeResponse = wantResponse && !!responseJson;
+    const hasPayload = !!payloadJson;
+    const hasResponse = !!responseJson;
 
-    if (includePayload || includeResponse) {
-      parts.push('────────────────────────────────────────────');
-      if (includePayload) {
-        parts.push('📦 PAYLOAD:');
-        parts.push('```');
-        parts.push(payloadJson);
-        parts.push('```');
-      }
-      if (includeResponse) {
-        if (includePayload) parts.push('');
-        parts.push('🧾 RESPONSE:');
-        parts.push('```');
-        parts.push(responseJson);
-        parts.push('```');
-      }
+    // PAYLOAD si disponible
+    if (hasPayload) {
+      parts.push('');
+      parts.push('📦 PAYLOAD:');
+      parts.push('```');
+      parts.push(payloadJson);
+      parts.push('```');
+    }
+
+    // RESPONSE si disponible
+    if (hasResponse) {
+      parts.push('');
+      parts.push('🧾 RESPONSE:');
+      parts.push('```');
+      parts.push(responseJson);
+      parts.push('```');
     }
 
     return parts.join('\n');
@@ -665,12 +722,42 @@
     }
   }
 
+  async function handleCopyCustom() {
+    const entry = state.entries.find(x => x.id === state.selectedId);
+    if (!entry) return;
+
+    try {
+      // Lire l'état des checkboxes
+      const chkToken = document.getElementById('chkToken');
+      const chkPayload = document.getElementById('chkPayload');
+      const chkResponse = document.getElementById('chkResponse');
+
+      const opts = {
+        includeToken: chkToken ? chkToken.checked : false,
+        includePayload: chkPayload ? chkPayload.checked : true,
+        includeResponse: chkResponse ? chkResponse.checked : true
+      };
+
+      const text = await buildCopiedText(entry, opts);
+      const ok = await copyTextToClipboard(text);
+      if (ok) showToast('Teamber — Copié ✓', true);
+      else showToast('Échec de la copie', false);
+    } catch (e) {
+      console.error('[Teamber Réseau] Erreur copie:', e);
+      showToast('Échec de la copie', false);
+    }
+  }
+
   async function handleCopy(withToken) {
     const entry = state.entries.find(x => x.id === state.selectedId);
     if (!entry) return;
 
     try {
-      const text = await buildCopiedText(entry, withToken);
+      const text = await buildCopiedText(entry, {
+        includeToken: withToken,
+        includePayload: true,
+        includeResponse: true
+      });
       const ok = await copyTextToClipboard(text);
       if (ok) showToast(withToken ? 'Teamber — Copié avec token ✓' : 'Teamber — Copié ✓', true);
       else showToast('Échec de la copie', false);
@@ -741,7 +828,11 @@
       const entry = state.entries.find(x => x.id === state.selectedId);
       if (!entry) return;
       try {
-        const text = await buildCopiedText(entry, false, { includeResponse: false });
+        const text = await buildCopiedText(entry, {
+          includeToken: false,
+          includePayload: true,
+          includeResponse: false
+        });
         const ok = await copyTextToClipboard(text);
         if (ok) showToast('Teamber — Copié (sans réponse) ✓', true);
         else showToast('Échec de la copie', false);
@@ -772,6 +863,27 @@
 
   // Boutons dans l'en-tête DETAILS (event delegation)
   $details.addEventListener('click', (e) => {
+    // Gérer le bouton principal de copie avec checkboxes
+    const copyBtn = e.target.closest('#btnCopyCustom');
+    if (copyBtn && !copyBtn.disabled) {
+      handleCopyCustom();
+      return;
+    }
+
+    // Gérer les boutons inline de copie pour Payload et Response
+    const btnPayloadInline = e.target.closest('#btnCopyPayloadInline');
+    if (btnPayloadInline && !btnPayloadInline.disabled) {
+      handleCopyPayload();
+      return;
+    }
+
+    const btnResponseInline = e.target.closest('#btnCopyResponseInline');
+    if (btnResponseInline && !btnResponseInline.disabled) {
+      handleCopyResponse();
+      return;
+    }
+
+    // Gérer les anciens boutons d'action (pour les sous-sections si besoin)
     const btn = e.target.closest('button[data-action]');
     if (!btn) return;
     if (btn.disabled) return;
@@ -858,6 +970,33 @@
     if (action === 'copy-token') handleCopy(true);
   });
 
+  // Charger les requêtes existantes au démarrage
+  async function loadExistingRequests() {
+    try {
+      if (b.devtools.network && typeof b.devtools.network.getHAR === 'function') {
+        const har = await new Promise((resolve, reject) => {
+          b.devtools.network.getHAR((harLog) => {
+            if (harLog) resolve(harLog);
+            else reject(new Error('No HAR data'));
+          });
+        });
+
+        if (har && har.entries && Array.isArray(har.entries)) {
+          console.log('[Teamber Réseau] Chargement de', har.entries.length, 'requêtes existantes');
+          for (const entry of har.entries) {
+            try {
+              addEntryFromRaw(entry);
+            } catch (e) {
+              console.warn('[Teamber Réseau] Erreur lors du chargement d\'une entrée HAR:', e);
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[Teamber Réseau] Impossible de charger les requêtes existantes:', e);
+    }
+  }
+
   // Écoute des requêtes réseau DevTools + nettoyage à la navigation/rafraîchissement
   try {
     // Nouvelles requêtes
@@ -889,6 +1028,9 @@
   // Initial render
   renderRows();
   renderDetails();
+
+  // Charger les requêtes existantes au démarrage
+  loadExistingRequests();
 
   // Exposer quelques helpers pour debug dans la console du panneau
   window.__TeamberNetwork = {
