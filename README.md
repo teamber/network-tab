@@ -2,14 +2,17 @@
 
 Panneau DevTools qui clone l’onglet Réseau et ajoute des actions de copie modernes (avec ou sans token). Pensé pour un usage quotidien en debug: filtre, tri, menu contextuel, copie formatée, et détails complets.
 
-## Installation (Firefox, temporaire)
-1. Ouvrez `about:debugging#/runtime/this-firefox` dans Firefox.
-2. Cliquez « Load Temporary Add-on » et sélectionnez le fichier `manifest.json` de ce dossier (Manifest V2).
-3. Ouvrez les DevTools (F12) puis l’onglet « Teamber Réseau ».
+## Installation (Chrome, permanent)
+Chrome ne supporte plus Manifest V2 pour les extensions grand public. Le projet inclut un manifeste MV3 séparé pour Chrome.
 
-Note: Manifest V2, add-on temporaire non persisté au redémarrage (il faudra le recharger au prochain lancement de Firefox).
+1) Téléchargez `teamber-reseau-chrome.zip` à partir des releases et dézippez le.
+2) Ouvrez `chrome://extensions`, activez « Mode développeur ».
+3) Cliquez « Charger l'extension non empaquetée » (Load unpacked).
+4) Sélectionnez le dossier `teamber-reseau-chrome`.
 
-### Installtion (Firefox, permanent)
+Remarque: `devtools_page` est supporté en MV3. Les permissions demandées sont minimales ("clipboardWrite"). Le code du panneau est compatible Chrome/Firefox grâce à la détection `browser`/`chrome`.
+
+## Installtion (Firefox, permanent)
 1. Assurez‑vous d’avoir `zip` disponible dans votre shell.
 2. Exécutez:
     - macOS/Linux: `bash build-firefox.sh`
@@ -19,35 +22,12 @@ Note: Manifest V2, add-on temporaire non persisté au redémarrage (il faudra le
 
 Ce script zipe directement les fichiers (manifest.json, *.html, *.js, icônes) sans encapsuler un dossier supplémentaire — c’est requis par Firefox.
 
-## Installation (Chrome)
-Chrome ne supporte plus Manifest V2 pour les extensions grand public. Le projet inclut un manifeste MV3 séparé pour Chrome.
+## Installation (Firefox, temporaire)
+1. Ouvrez `about:debugging#/runtime/this-firefox` dans Firefox.
+2. Cliquez « Load Temporary Add-on » et sélectionnez le fichier `manifest.json` de ce dossier (Manifest V2).
+3. Ouvrez les DevTools (F12) puis l’onglet « Teamber Réseau ».
 
-Deux options:
-- Développement (recommandé):
-  1) Ouvrez `chrome://extensions`, activez « Mode développeur ».
-  2) Cliquez « Charger l'extension non empaquetée » (Load unpacked).
-  3) Sélectionnez le dossier `dist/chrome` (voir section « Construction des paquets » ci‑dessous), ou bien renommez/copiez `manifest.chrome.json` → `manifest.json` dans une copie du projet avant de charger le dossier.
-
-- Empaquetage CRX:
-  1) Préparez le dossier `dist/chrome` (voir ci‑dessous).
-  2) Dans `chrome://extensions`, bouton « Pack extension » et choisissez ce dossier. Chrome générera le `.crx` et la clé `.pem`.
-
-Remarque: `devtools_page` est supporté en MV3. Les permissions demandées sont minimales ("clipboardWrite"). Le code du panneau est compatible Chrome/Firefox grâce à la détection `browser`/`chrome`. 
-
-## Construction des paquets (éviter les archives "corrompues")
-Des archives « corrompues » proviennent généralement de:
-- Mauvais manifeste pour le navigateur ciblé (MV2 sur Chrome, ou MV3 sur Firefox).
-- Mauvais niveau de zip (zippage du dossier parent au lieu de zipper les fichiers à la racine).
-- Fichiers manquants dans l’archive (manifest, HTML/JS/icônes) ou encodage exotique.
-
-Des scripts simples sont fournis:
-
-### Chrome (MV3)
-1. Exécutez:
-   - macOS/Linux: `bash build-chrome.sh`
-2. Chargez le dossier `dist/chrome` via « Load unpacked » (développement), ou utilisez « Pack extension » en pointant sur `dist/chrome` pour produire un `.crx`.
-
-Astuce: ne tentez pas de zipper la racine du projet pour Chrome, car elle contient un `manifest.json` MV2 (destiné à Firefox). Utilisez `dist/chrome` qui contient un `manifest.json` MV3.
+Note: Manifest V2, add-on temporaire non persisté au redémarrage (il faudra le recharger au prochain lancement de Firefox).
 
 ## Utilisation rapide
 - Regénérez des requêtes (recharger la page) pour alimenter la liste.
@@ -112,7 +92,7 @@ Exemple exact (sortie copiée):
 
 ---
 
-## Erreurs d'installation fréquentes et solutions
+``## Erreurs d'installation fréquentes et solutions
 
 ### Chrome — « CRX_REQUIRED_PROOF_MISSING »
 Cette erreur survient quand on essaie d’installer un fichier `.crx` qui ne provient pas du Chrome Web Store. Depuis plusieurs années, Chrome bloque l’installation hors‑store des CRX pour des raisons de sécurité.
@@ -131,3 +111,4 @@ Solutions:
 - Utilisation temporaire (recommandée pour le dev): ouvrez `about:debugging#/runtime/this-firefox` → « Load Temporary Add‑on » → choisissez `manifest.json` (ou `dist/firefox/teamber-reseau.xpi`).
 - Si vous voulez installer de façon persistante: il faut signer l’extension via addons.mozilla.org (AMO) ou utiliser Firefox Developer Edition en désactivant la signature (`xpinstall.signatures.required=false`).
 - Assurez‑vous que l’XPI est construit en zippant directement les fichiers (manifest, *.html, *.js, icônes) à la racine, sans dossier parent. Utilisez `bash build-firefox.sh` pour générer un XPI conforme.
+``
