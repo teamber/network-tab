@@ -17,13 +17,17 @@
   const MAX_ROWS = 200;                 // Limite de la liste
   const MAX_BODY_CHARS = 4000;          // Troncature des bodies
   const GET_CONTENT_TIMEOUT_MS = 2000;  // Timeout best-effort pour getContent()
+  const STORAGE_KEY_COPY_OPTIONS = 'teamber.copy.options';
+  const STORAGE_KEY_PRIMARY_COLOR = 'teamber.primary.color';
+  const DEFAULT_PRIMARY_COLOR = '#58a6ff';
 
   // Etat
   const state = {
     entries: [],   // { id, url, method, status, timeString, durationMs, request, response, raw }
     selectedId: null,
     filter: '',
-    sort: { key: null, dir: 'asc' } // key in ['status','method','file','size','url']
+    sort: { key: null, dir: 'asc' }, // key in ['status','method','file','size','url']
+    activeTab: 'headers' // Onglet actif dans les détails
   };
   let idSeq = 1;
 
@@ -128,17 +132,91 @@
     } catch { return '—'; }
   }
 
-  // Détermine si la requête est de type XHR/fetch (à exclure de l'affichage des "vrais" appels)
-  function isXhrOrFetch(raw) {
+  // Filtre les ressources statiques (CSS, JS, images, fonts, etc.)
+  function isStaticResource(url, type) {
     try {
-      const t = (raw && raw.cause && raw.cause.type)
-        || (raw && raw.initiator && raw.initiator.type)
-        || (raw && raw._initiator && raw._initiator.type)
-        || '';
-      const type = String(t || '').toLowerCase();
-      return type === 'xhr' || type === 'xmlhttprequest' || type === 'fetch';
+      const urlLower = String(url || '').toLowerCase();
+      const typeLower = String(type || '').toLowerCase();
+
+      // Filtrer par extension
+      const staticExtensions = ['.css', '.js', '.jpg', '.jpeg', '.png', '.gif', '.svg', '.ico',
+                                '.woff', '.woff2', '.ttf', '.eot', '.otf', '.map'];
+      if (staticExtensions.some(ext => urlLower.endsWith(ext))) {
+        return true;
+      }
+
+      // Filtrer par type de ressource
+      const staticTypes = ['stylesheet', 'script', 'image', 'font', 'media'];
+      if (staticTypes.includes(typeLower)) {
+        return true;
+      }
+
+      return false;
     } catch {
       return false;
+    }
+  }
+
+  // Sauvegarder les options de copie
+  function saveCopyOptions(token, payload, response) {
+    try {
+      localStorage.setItem(STORAGE_KEY_COPY_OPTIONS, JSON.stringify({
+        token: token,
+        payload: payload,
+        response: response
+      }));
+    } catch (e) {
+      console.warn('[Teamber Réseau] Erreur sauvegarde copy options:', e);
+    }
+  }
+
+  // Charger les options de copie
+  function loadCopyOptions() {
+    try {
+      const data = localStorage.getItem(STORAGE_KEY_COPY_OPTIONS);
+      if (data) {
+        return JSON.parse(data);
+      }
+    } catch (e) {
+      console.warn('[Teamber Réseau] Erreur chargement copy options:', e);
+    }
+    return { token: false, payload: true, response: true };
+  }
+
+  // Sauvegarder la couleur primaire
+  function savePrimaryColor(color) {
+    try {
+      localStorage.setItem(STORAGE_KEY_PRIMARY_COLOR, color);
+      applyPrimaryColor(color);
+    } catch (e) {
+      console.warn('[Teamber Réseau] Erreur sauvegarde couleur primaire:', e);
+    }
+  }
+
+  // Charger la couleur primaire
+  function loadPrimaryColor() {
+    try {
+      const color = localStorage.getItem(STORAGE_KEY_PRIMARY_COLOR);
+      return color || DEFAULT_PRIMARY_COLOR;
+    } catch (e) {
+      console.warn('[Teamber Réseau] Erreur chargement couleur primaire:', e);
+      return DEFAULT_PRIMARY_COLOR;
+    }
+  }
+
+  // Appliquer la couleur primaire
+  function applyPrimaryColor(color) {
+    try {
+      document.documentElement.style.setProperty('--accent', color);
+      // Calculer une version plus foncée pour le hover
+      const rgb = parseInt(color.slice(1), 16);
+      const r = Math.max(0, ((rgb >> 16) & 0xff) - 20);
+      const g = Math.max(0, ((rgb >> 8) & 0xff) - 20);
+      const bl = Math.max(0, (rgb & 0xff) - 20);
+      const hoverColor = `#${((1 << 24) + (r << 16) + (g << 8) + bl).toString(16).slice(1)}`;
+      document.documentElement.style.setProperty('--accent-hover', hoverColor);
+    } catch (e) {
+      console.warn('[Teamber Réseau] Erreur application couleur:', e);
     }
   }
 
@@ -200,11 +278,23 @@
   }
 
   // Efface l'historique (entrées) lors d'un rafraîchissement/navigation de la page
-  function clearHistory(reason) {
+  async function clearHistory(reason) {
     try {
       state.entries = [];
       clearSelection();
       renderRows();
+
+      // Effacer aussi les requêtes dans le background
+      try {
+        const tabId = b.devtools.inspectedWindow.tabId;
+        await b.runtime.sendMessage({
+          type: 'clearRequests',
+          tabId: tabId
+        });
+      } catch (e) {
+        console.warn('[Teamber Réseau] Erreur lors du clear background:', e);
+      }
+
       // Toast informatif (discret)
       if (reason) {
         showToast(`Historique effacé — ${reason}`, true);
@@ -259,8 +349,13 @@
     let base = !f ? state.entries.slice() : state.entries.filter(e => {
       return (e.url && e.url.toLowerCase().includes(f)) || (e.method && e.method.toLowerCase().includes(f));
     });
-    // Filtrer: supprimer les XHR/fetch pour n'afficher que les "vrais" appels (documents/ressources)
-    base = base.filter(e => !isXhrOrFetch(e.raw));
+
+    // Filtrer les ressources statiques (CSS, JS, images, fonts, etc.)
+    base = base.filter(e => {
+      const type = (e.raw && e.raw._initiator && e.raw._initiator.type) ||
+                   (e.raw && e.raw.type) || '';
+      return !isStaticResource(e.url, type);
+    });
 
     // Partition: non-erreurs d'abord, erreurs (>=400) ensuite (toujours en bas)
     const nonErr = [];
@@ -347,144 +442,398 @@
     }
   }
 
-  function detailsHeaderHtml(disabled) {
+  function buildTabsActionsHtml(disabled) {
     const dis = disabled ? 'disabled' : '';
-    return `<div class="section-header details-header">
-      <div class="copy-options">
-        <div class="copy-options-left">
-          <div class="checkbox-wrapper">
-            <input type="checkbox" id="chkToken" ${disabled ? 'disabled' : ''}>
+    const options = loadCopyOptions();
+    const primaryColor = loadPrimaryColor();
+    return `
+      <button id="btnCopyCustom" class="tabs-action-btn" ${dis}>Copier</button>
+      <div class="tabs-settings-wrapper">
+        <button id="copySettingsBtn" class="tabs-settings-btn" title="Options de copie" ${dis}>
+          <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path d="M12 15.5A3.5 3.5 0 0 1 8.5 12 3.5 3.5 0 0 1 12 8.5a3.5 3.5 0 0 1 3.5 3.5 3.5 3.5 0 0 1-3.5 3.5m7.43-2.53c.04-.32.07-.64.07-.97 0-.33-.03-.66-.07-1l2.11-1.63c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.31-.61-.22l-2.49 1c-.52-.39-1.06-.73-1.69-.98l-.37-2.65A.506.506 0 0 0 14 2h-4c-.25 0-.46.18-.5.42l-.37 2.65c-.63.25-1.17.59-1.69.98l-2.49-1c-.22-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64L4.57 11c-.04.34-.07.67-.07 1 0 .33.03.65.07.97l-2.11 1.66c-.19.15-.25.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1.01c.52.4 1.06.74 1.69.99l.37 2.65c.04.24.25.42.5.42h4c.25 0 .46-.18.5-.42l.37-2.65c.63-.26 1.17-.59 1.69-.99l2.49 1.01c.22.08.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.66z"/>
+          </svg>
+        </button>
+        <div id="copySettingsDropdown" class="settings-dropdown">
+          <div class="settings-option">
+            <input type="checkbox" id="chkToken" ${disabled ? 'disabled' : ''} ${options.token ? 'checked' : ''}>
             <label for="chkToken">Token</label>
           </div>
-          <div class="checkbox-wrapper">
-            <input type="checkbox" id="chkPayload" ${disabled ? 'disabled' : ''} checked>
+          <div class="settings-option">
+            <input type="checkbox" id="chkPayload" ${disabled ? 'disabled' : ''} ${options.payload ? 'checked' : ''}>
             <label for="chkPayload">Payload</label>
           </div>
-          <div class="checkbox-wrapper">
-            <input type="checkbox" id="chkResponse" ${disabled ? 'disabled' : ''} checked>
+          <div class="settings-option">
+            <input type="checkbox" id="chkResponse" ${disabled ? 'disabled' : ''} ${options.response ? 'checked' : ''}>
             <label for="chkResponse">Réponse</label>
           </div>
+          <div class="settings-divider"></div>
+          <div class="color-picker-wrapper">
+            <span class="color-picker-label">Couleur primaire</span>
+            <input type="color" id="primaryColorPicker" class="color-picker-input" value="${primaryColor}" ${disabled ? 'disabled' : ''}>
+          </div>
         </div>
-        <button id="btnCopyCustom" class="copy-btn" ${dis}>Copier</button>
       </div>
-    </div>`;
+    `;
   }
 
   function renderDetails() {
     const e = state.entries.find(x => x.id === state.selectedId);
     if (!e) {
-      $details.innerHTML = detailsHeaderHtml(true) + '<div class=\"muted\" style=\"padding:12px 14px\">Sélectionnez une requête pour voir les détails…</div>';
+      $details.innerHTML = `
+        <div class="tabs-container">
+          <div class="tabs-nav">
+            <div class="tabs-nav-scroll">
+            </div>
+            <div class="tabs-nav-actions">
+              ${buildTabsActionsHtml(true)}
+            </div>
+          </div>
+          <div style="padding:16px; color: var(--muted);">Sélectionnez une requête pour voir les détails…</div>
+        </div>
+      `;
       return;
     }
 
-    // Préparer headers pour affichage
+    // Extraire toutes les données nécessaires
     const reqHeaders = e.request && e.request.headers || [];
     const resHeaders = e.response && e.response.headers || [];
+    const reqCookies = e.request && e.request.cookies || [];
+    const resCookies = e.response && e.response.cookies || [];
 
-    const reqKv = (reqHeaders||[]).map(h => `<div>${escapeHtml(h.name || '')}</div><div class=\"code\">${escapeHtml(h.value || '')}</div>`).join('');
-    const resKv = (resHeaders||[]).map(h => `<div>${escapeHtml(h.name || '')}</div><div class=\"code\">${escapeHtml(h.value || '')}</div>`).join('');
-
-    // Préparer contenu Payload/Response (préttifié JSON + surlignage), sans appel getContent() automatique
     let payloadRaw = '';
     try {
       const pd = e.request && e.request.postData;
       payloadRaw = (pd && (pd.text || (pd.params && JSON.stringify(pd.params)))) || '';
     } catch (_) {}
-    const hasPayloadJson = hasParsableJson(payloadRaw);
-    const payloadPretty = hasPayloadJson ? prettyMaybeJson(payloadRaw) : '';
-    const payloadHtml = hasPayloadJson ? highlightJson(safeTruncate(payloadPretty || '', MAX_BODY_CHARS)) : '<div class="muted">(aucun JSON)</div>';
 
     const respRaw = (e.response && e.response.content && e.response.content.text);
-    const hasRespJson = hasParsableJson(respRaw);
-    const responsePretty = hasRespJson ? prettyMaybeJson(respRaw) : '';
-    const responseHtml = hasRespJson ? highlightJson(safeTruncate(responsePretty || '', MAX_BODY_CHARS)) : '<div class="muted">(aucun JSON)</div>';
+    const timings = (e.raw && e.raw.timings) || {};
+    const initiator = getInitiator(e.raw);
 
-    // Extraire juste le pathname de l'URL
-    let pathname = '';
-    try {
-      const urlObj = new URL(e.url);
-      pathname = urlObj.pathname + urlObj.search;
-    } catch {
-      pathname = e.url || '';
-    }
+    // Construire les onglets
+    const headersTabHtml = buildHeadersTab(reqHeaders, resHeaders);
+    const cookiesTabHtml = buildCookiesTab(reqCookies, resCookies);
+    const requestTabHtml = buildRequestTab(e, payloadRaw);
+    const responseTabHtml = buildResponseTab(e, respRaw);
+    const timingsTabHtml = buildTimingsTab(timings, e.durationMs);
+    const traceTabHtml = buildTraceTab(initiator);
 
-    const statusClass = (code) => {
-      if (code >= 200 && code < 300) return 'ok';
-      if (code >= 300 && code < 400) return 'warn';
-      if (code >= 400) return 'err';
-      return '';
-    };
+    const tabs = [
+      { id: 'headers', label: 'En-têtes', content: headersTabHtml },
+      { id: 'request', label: 'Requête', content: requestTabHtml },
+      { id: 'response', label: 'Réponse', content: responseTabHtml },
+      { id: 'cookies', label: 'Cookies', content: cookiesTabHtml },
+      { id: 'timings', label: 'Délais', content: timingsTabHtml },
+      { id: 'trace', label: 'Trace', content: traceTabHtml }
+    ];
+
+    const tabsNavHtml = tabs.map(tab =>
+      `<button class="tab-button ${state.activeTab === tab.id ? 'active' : ''}" data-tab="${tab.id}">${escapeHtml(tab.label)}</button>`
+    ).join('');
+
+    const tabsContentHtml = tabs.map(tab =>
+      `<div class="tab-content ${state.activeTab === tab.id ? 'active' : ''}" data-tab="${tab.id}">${tab.content}</div>`
+    ).join('');
 
     $details.innerHTML = `
-      ${detailsHeaderHtml(false)}
-      <div class=\"details-content\">
-        <div class=\"request-summary\">
-          <span class=\"request-summary-url\">${escapeHtml(pathname)}</span>
-          <span class=\"request-summary-method\">${escapeHtml(e.method || '')}</span>
-          <span class=\"request-summary-status ${statusClass(e.status)}\">${escapeHtml(String(e.status || ''))}</span>
-          <span class=\"request-summary-duration\">${escapeHtml(fmtTime(e.durationMs || 0))}</span>
-        </div>
-
-        <div class=\"section\">
-          <div class=\"section-title-wrapper\">
-            <h3>Payload</h3>
-            <button class=\"section-copy-btn\" id=\"btnCopyPayloadInline\" ${hasPayloadJson ? '' : 'disabled'}>📋 Copier</button>
+      <div class="tabs-container">
+        <div class="tabs-nav">
+          <div class="tabs-nav-scroll">
+            ${tabsNavHtml}
           </div>
-          <pre class=\"code json\">${payloadHtml}</pre>
-        </div>
-
-        <div class=\"section\">
-          <div class=\"section-title-wrapper\">
-            <h3>Response</h3>
-            <button class=\"section-copy-btn\" id=\"btnCopyResponseInline\" ${hasRespJson ? '' : 'disabled'}>📋 Copier</button>
-          </div>
-          <pre id=\"respPre\" class=\"code json\">${responseHtml}</pre>
-        </div>
-
-        <div class=\"section\">
-          <div class=\"section-title-wrapper\">
-            <h3>Headers (Request)</h3>
-          </div>
-          <div class=\"code\">
-            ${reqKv ? `<div class=\"kv\">${reqKv}</div>` : '<div class=\"muted\">(aucun)</div>'}
+          <div class="tabs-nav-actions">
+            ${buildTabsActionsHtml(false)}
           </div>
         </div>
-
-        <div class=\"section\">
-          <div class=\"section-title-wrapper\">
-            <h3>Headers (Response)</h3>
-          </div>
-          <div class=\"code\">
-            ${resKv ? `<div class=\"kv\">${resKv}</div>` : '<div class=\"muted\">(aucun)</div>'}
-          </div>
-        </div>
+        ${tabsContentHtml}
       </div>
     `;
 
-    // Lazy load de la réponse pour l'aperçu dans la section détails
-    (async () => {
-      try {
-        const currentId = e.id;
-        const target = document.getElementById('respPre');
-        const btnInline = document.getElementById('btnCopyResponseInline');
-        if (!target) return;
-        const got = await ensureResponseBody(e, { timeoutMs: 3000 });
-        if (state.selectedId !== currentId) return; // la sélection a changé entre-temps
-        if (got && typeof got.text === 'string') {
-          let text = got.text;
-          if (hasParsableJson(text)) {
-            try { text = JSON.stringify(JSON.parse(String(text).trim()), null, 2); } catch {}
-            target.innerHTML = highlightJson(safeTruncate(text || '', MAX_BODY_CHARS));
-            if (btnInline) btnInline.disabled = false;
+    // Ajouter les event listeners pour les onglets
+    const tabButtons = $details.querySelectorAll('.tab-button');
+    tabButtons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        const tabId = btn.dataset.tab;
+        state.activeTab = tabId;
+
+        // Update active states
+        $details.querySelectorAll('.tab-button').forEach(b => b.classList.remove('active'));
+        $details.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+        btn.classList.add('active');
+        $details.querySelector(`.tab-content[data-tab="${tabId}"]`).classList.add('active');
+
+        // Lazy load si nécessaire
+        if (tabId === 'response') {
+          loadResponseBody(e);
+        }
+      });
+    });
+
+    // Event listeners pour les sections collapsables
+    const collapsableTitles = $details.querySelectorAll('.collapsable-section-title');
+    collapsableTitles.forEach(title => {
+      title.addEventListener('click', () => {
+        const targetId = title.dataset.collapse;
+        const content = document.getElementById(targetId);
+        if (content) {
+          title.classList.toggle('collapsed');
+          content.classList.toggle('collapsed');
+        }
+      });
+    });
+
+    // Event listeners pour les boutons copier dans les onglets
+    const btnCopyRequestBody = document.getElementById('btnCopyRequestBody');
+    if (btnCopyRequestBody) {
+      btnCopyRequestBody.addEventListener('click', () => {
+        try {
+          const text = payloadRaw || '';
+          if (text) {
+            navigator.clipboard.writeText(text);
+            showToast('Corps de requête copié', true);
+          }
+        } catch (err) {
+          showToast('Erreur lors de la copie', false);
+        }
+      });
+    }
+
+    const btnCopyResponseBody = document.getElementById('btnCopyResponseBody');
+    if (btnCopyResponseBody) {
+      btnCopyResponseBody.addEventListener('click', async () => {
+        try {
+          let text = respRaw || '';
+          if (!text) {
+            const got = await ensureResponseBody(e, { timeoutMs: 3000 });
+            if (got && got.text) {
+              text = got.text;
+            }
+          }
+          if (text) {
+            navigator.clipboard.writeText(text);
+            showToast('Corps de réponse copié', true);
           } else {
-            target.innerHTML = '<div class="muted">(aucun JSON)</div>';
-            if (btnInline) btnInline.disabled = true;
+            showToast('Aucune donnée à copier', false);
+          }
+        } catch (err) {
+          showToast('Erreur lors de la copie', false);
+        }
+      });
+    }
+
+    // Event listener pour le bouton settings de copie
+    const copySettingsBtn = document.getElementById('copySettingsBtn');
+    const copySettingsDropdown = document.getElementById('copySettingsDropdown');
+    if (copySettingsBtn && copySettingsDropdown) {
+      copySettingsBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        copySettingsDropdown.classList.toggle('active');
+      });
+
+      // Fermer le dropdown quand on clique en dehors
+      const closeDropdownHandler = (ev) => {
+        if (!copySettingsBtn.contains(ev.target) && !copySettingsDropdown.contains(ev.target)) {
+          copySettingsDropdown.classList.remove('active');
+        }
+      };
+      document.addEventListener('click', closeDropdownHandler);
+
+      // Event listeners pour les checkboxes
+      const chkToken = document.getElementById('chkToken');
+      const chkPayload = document.getElementById('chkPayload');
+      const chkResponse = document.getElementById('chkResponse');
+
+      const saveOptions = () => {
+        saveCopyOptions(
+          chkToken ? chkToken.checked : false,
+          chkPayload ? chkPayload.checked : false,
+          chkResponse ? chkResponse.checked : false
+        );
+      };
+
+      if (chkToken) chkToken.addEventListener('change', saveOptions);
+      if (chkPayload) chkPayload.addEventListener('change', saveOptions);
+      if (chkResponse) chkResponse.addEventListener('change', saveOptions);
+
+      // Event listener pour le color picker
+      const colorPicker = document.getElementById('primaryColorPicker');
+      if (colorPicker) {
+        colorPicker.addEventListener('input', (ev) => {
+          savePrimaryColor(ev.target.value);
+        });
+      }
+    }
+
+    // Event listeners pour les boutons copier dans les headers
+    const headerCopyBtns = $details.querySelectorAll('.header-copy-btn');
+    headerCopyBtns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        const value = btn.dataset.copyValue;
+        if (value) {
+          try {
+            navigator.clipboard.writeText(value);
+            showToast('Token copié', true);
+          } catch (err) {
+            showToast('Erreur lors de la copie', false);
           }
         }
-      } catch (err) {
-        // silencieux; l'aperçu initial restera basé sur HAR si disponible
+      });
+    });
+
+    // Lazy load de la réponse si onglet Response
+    if (state.activeTab === 'response') {
+      loadResponseBody(e);
+    }
+  }
+
+  function buildHeadersTab(reqHeaders, resHeaders) {
+    const reqRows = reqHeaders.map(h => {
+      const isAuth = (h.name || '').toLowerCase() === 'authorization';
+      const nameRow = `<tr><td class="header-name" colspan="2">${escapeHtml(h.name || '')}</td></tr>`;
+      const valueRow = isAuth
+        ? `<tr><td class="header-value-with-btn">
+             <span>${escapeHtml(h.value || '')}</span>
+             <button class="header-copy-btn" data-copy-value="${escapeHtml(h.value || '')}" title="Copier le token">📋</button>
+           </td></tr>`
+        : `<tr><td class="header-value" colspan="2">${escapeHtml(h.value || '')}</td></tr>`;
+      return nameRow + valueRow;
+    }).join('');
+
+    const resRows = resHeaders.map(h =>
+      `<tr><td class="header-name" colspan="2">${escapeHtml(h.name || '')}</td></tr>
+       <tr><td class="header-value" colspan="2">${escapeHtml(h.value || '')}</td></tr>`
+    ).join('');
+
+    return `
+      <div class="collapsable-section">
+        <div class="collapsable-section-title" data-collapse="req-headers">En-têtes de requête</div>
+        <div class="collapsable-content" id="req-headers">
+          ${reqRows ? `<table class="info-table"><tbody>${reqRows}</tbody></table>` : '<div class="muted">Aucun en-tête</div>'}
+        </div>
+      </div>
+      <div class="collapsable-section">
+        <div class="collapsable-section-title" data-collapse="res-headers">En-têtes de réponse</div>
+        <div class="collapsable-content" id="res-headers">
+          ${resRows ? `<table class="info-table"><tbody>${resRows}</tbody></table>` : '<div class="muted">Aucun en-tête</div>'}
+        </div>
+      </div>
+    `;
+  }
+
+  function buildCookiesTab(reqCookies, resCookies) {
+    const reqRows = reqCookies.map(c =>
+      `<tr><td>${escapeHtml(c.name || '')}</td><td>${escapeHtml(c.value || '')}</td></tr>`
+    ).join('');
+    const resRows = resCookies.map(c =>
+      `<tr><td>${escapeHtml(c.name || '')}</td><td>${escapeHtml(c.value || '')}</td></tr>`
+    ).join('');
+
+    return `
+      <div class="info-section">
+        <div class="info-section-title">Cookies de requête</div>
+        ${reqRows ? `<table class="info-table"><tbody>${reqRows}</tbody></table>` : '<div class="muted">Aucun cookie</div>'}
+      </div>
+      <div class="info-section">
+        <div class="info-section-title">Cookies de réponse</div>
+        ${resRows ? `<table class="info-table"><tbody>${resRows}</tbody></table>` : '<div class="muted">Aucun cookie</div>'}
+      </div>
+    `;
+  }
+
+  function buildRequestTab(e, payloadRaw) {
+    const hasPayloadJson = hasParsableJson(payloadRaw);
+    const payloadPretty = hasPayloadJson ? prettyMaybeJson(payloadRaw) : payloadRaw;
+    const payloadHtml = hasPayloadJson ? highlightJson(safeTruncate(payloadPretty || '', MAX_BODY_CHARS)) :
+                        (payloadRaw ? `<div>${escapeHtml(payloadRaw)}</div>` : '<div class="muted">Aucune donnée</div>');
+
+    return `
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <div class="info-section-title" style="margin-bottom: 0;">Corps de la requête</div>
+        <button class="section-copy-btn" id="btnCopyRequestBody" ${payloadRaw ? '' : 'disabled'}>📋 Copier</button>
+      </div>
+      <pre id="requestBodyPre" class="code json">${payloadHtml}</pre>
+    `;
+  }
+
+  function buildResponseTab(e, respRaw) {
+    const hasRespJson = hasParsableJson(respRaw);
+    const responsePretty = hasRespJson ? prettyMaybeJson(respRaw) : respRaw;
+    const responseHtml = hasRespJson ? highlightJson(safeTruncate(responsePretty || '', MAX_BODY_CHARS)) :
+                         (respRaw ? `<div>${escapeHtml(respRaw)}</div>` : '<div class="muted">Chargement...</div>');
+
+    return `
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <div class="info-section-title" style="margin-bottom: 0;">Corps de la réponse</div>
+        <button class="section-copy-btn" id="btnCopyResponseBody">📋 Copier</button>
+      </div>
+      <pre id="respPre" class="code json">${responseHtml}</pre>
+    `;
+  }
+
+  function buildTimingsTab(timings, totalDuration) {
+    const timingRows = [
+      { label: 'Bloqué', value: timings.blocked },
+      { label: 'DNS', value: timings.dns },
+      { label: 'Connexion', value: timings.connect },
+      { label: 'SSL', value: timings.ssl },
+      { label: 'Envoi', value: timings.send },
+      { label: 'Attente', value: timings.wait },
+      { label: 'Réception', value: timings.receive },
+      { label: 'Total', value: totalDuration }
+    ].map(({ label, value }) => {
+      const val = (value !== undefined && value >= 0) ? `${Math.round(value)} ms` : '—';
+      return `<tr><td>${label}</td><td>${val}</td></tr>`;
+    }).join('');
+
+    return `
+      <div class="info-section">
+        <table class="info-table">
+          <tbody>${timingRows}</tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  function buildTraceTab(initiator) {
+    return `
+      <div class="info-section">
+        <table class="info-table">
+          <tbody>
+            <tr><td>Initiateur</td><td>${escapeHtml(String(initiator || '—'))}</td></tr>
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  async function loadResponseBody(e) {
+    try {
+      const currentId = e.id;
+      const target = document.getElementById('respPre');
+      if (!target) return;
+      const got = await ensureResponseBody(e, { timeoutMs: 3000 });
+      if (state.selectedId !== currentId) return;
+      if (got && typeof got.text === 'string') {
+        let text = got.text;
+        if (hasParsableJson(text)) {
+          try { text = JSON.stringify(JSON.parse(String(text).trim()), null, 2); } catch {}
+          target.innerHTML = highlightJson(safeTruncate(text || '', MAX_BODY_CHARS));
+        } else if (text.trim()) {
+          // Afficher le contenu brut s'il existe
+          target.innerHTML = `<div>${escapeHtml(text)}</div>`;
+        } else {
+          target.innerHTML = '<div class="muted">Aucune donnée</div>';
+        }
+      } else {
+        target.innerHTML = '<div class="muted">Aucune donnée</div>';
       }
-    })();
+    } catch (err) {
+      const target = document.getElementById('respPre');
+      if (target) {
+        target.innerHTML = '<div class="muted">Erreur lors du chargement</div>';
+      }
+    }
   }
 
   function escapeHtml(s) {
@@ -837,7 +1186,7 @@
 
   // Événements UI
   $filter.addEventListener('input', (e) => setFilter(e.target.value));
-  $clearBtn.addEventListener('click', () => { state.entries = []; clearSelection(); renderRows(); });
+  $clearBtn.addEventListener('click', () => clearHistory('manuel'));
 
   // Boutons dans l'en-tête DETAILS (event delegation)
   $details.addEventListener('click', (e) => {
@@ -997,8 +1346,36 @@
     if (action === 'copy-token') handleCopy(true);
   });
 
-  // Charger les requêtes existantes au démarrage
+  // Charger les requêtes depuis le background script
+  async function loadRequestsFromBackground() {
+    try {
+      const tabId = b.devtools.inspectedWindow.tabId;
+      const response = await b.runtime.sendMessage({
+        type: 'getRequests',
+        tabId: tabId
+      });
+
+      if (response && response.requests && Array.isArray(response.requests)) {
+        console.log('[Teamber Réseau] Chargement de', response.requests.length, 'requêtes depuis background');
+        for (const entry of response.requests) {
+          try {
+            addEntryFromRaw(entry);
+          } catch (e) {
+            console.warn('[Teamber Réseau] Erreur lors du chargement d\'une entrée:', e);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[Teamber Réseau] Impossible de charger depuis background:', e);
+    }
+  }
+
+  // Charger les requêtes existantes au démarrage (fallback pour compatibilité)
   async function loadExistingRequests() {
+    // D'abord essayer de charger depuis le background
+    await loadRequestsFromBackground();
+
+    // Ensuite charger depuis HAR (pour les requêtes capturées par DevTools)
     try {
       if (b.devtools.network && typeof b.devtools.network.getHAR === 'function') {
         const har = await new Promise((resolve, reject) => {
@@ -1009,10 +1386,17 @@
         });
 
         if (har && har.entries && Array.isArray(har.entries)) {
-          console.log('[Teamber Réseau] Chargement de', har.entries.length, 'requêtes existantes');
+          console.log('[Teamber Réseau] Chargement de', har.entries.length, 'requêtes depuis HAR');
           for (const entry of har.entries) {
             try {
-              addEntryFromRaw(entry);
+              // Éviter les doublons en vérifiant l'URL et le timestamp
+              const exists = state.entries.some(e =>
+                e.url === entry.request.url &&
+                Math.abs(e.durationMs - (entry.time || 0)) < 10
+              );
+              if (!exists) {
+                addEntryFromRaw(entry);
+              }
             } catch (e) {
               console.warn('[Teamber Réseau] Erreur lors du chargement d\'une entrée HAR:', e);
             }
@@ -1020,7 +1404,7 @@
         }
       }
     } catch (e) {
-      console.warn('[Teamber Réseau] Impossible de charger les requêtes existantes:', e);
+      console.warn('[Teamber Réseau] Impossible de charger les requêtes HAR:', e);
     }
   }
 
@@ -1053,6 +1437,7 @@
   }
 
   // Initial render
+  applyPrimaryColor(loadPrimaryColor()); // Appliquer la couleur primaire sauvegardée
   renderRows();
   renderDetails();
 
