@@ -351,17 +351,19 @@
     const dis = disabled ? 'disabled' : '';
     return `<div class="section-header details-header">
       <div class="copy-options">
-        <div class="checkbox-wrapper">
-          <input type="checkbox" id="chkToken" ${disabled ? 'disabled' : ''}>
-          <label for="chkToken">Token</label>
-        </div>
-        <div class="checkbox-wrapper">
-          <input type="checkbox" id="chkPayload" ${disabled ? 'disabled' : ''} checked>
-          <label for="chkPayload">Payload</label>
-        </div>
-        <div class="checkbox-wrapper">
-          <input type="checkbox" id="chkResponse" ${disabled ? 'disabled' : ''} checked>
-          <label for="chkResponse">Réponse</label>
+        <div class="copy-options-left">
+          <div class="checkbox-wrapper">
+            <input type="checkbox" id="chkToken" ${disabled ? 'disabled' : ''}>
+            <label for="chkToken">Token</label>
+          </div>
+          <div class="checkbox-wrapper">
+            <input type="checkbox" id="chkPayload" ${disabled ? 'disabled' : ''} checked>
+            <label for="chkPayload">Payload</label>
+          </div>
+          <div class="checkbox-wrapper">
+            <input type="checkbox" id="chkResponse" ${disabled ? 'disabled' : ''} checked>
+            <label for="chkResponse">Réponse</label>
+          </div>
         </div>
         <button id="btnCopyCustom" class="copy-btn" ${dis}>Copier</button>
       </div>
@@ -871,43 +873,92 @@
     if (action === 'copy-response') handleCopyResponse();
   });
 
-  // Resizer vertical (entre URL et DETAILS)
-  (function initRowResizer(){
+  // Resizer (entre URL et DETAILS) - responsive: vertical ou horizontal
+  (function initResizer(){
     if (!$split || !$rowResizer) return;
-    const STORAGE_KEY = 'teamber.split.ratio';
+    const STORAGE_KEY_ROWS = 'teamber.split.ratio.rows';
+    const STORAGE_KEY_COLS = 'teamber.split.ratio.cols';
     let drag = null;
+
+    function isWideLayout() {
+      return window.innerWidth >= 768;
+    }
+
     function applyByRatio(ratio) {
       const rect = $split.getBoundingClientRect();
-      if (!rect || rect.height <= 0) return;
-      const minTop = 80; // px
-      const minBottom = 120; // px (pour contenu details)
-      const topPx = Math.max(minTop, Math.min(rect.height - minBottom, Math.round(rect.height * ratio)));
-      $split.style.gridTemplateRows = `${topPx}px 6px 1fr`;
+      if (!rect) return;
+      const wide = isWideLayout();
+
+      if (wide) {
+        // Mode horizontal (colonnes)
+        if (rect.width <= 0) return;
+        const minLeft = 200;
+        const minRight = 300;
+        const leftPx = Math.max(minLeft, Math.min(rect.width - minRight, Math.round(rect.width * ratio)));
+        $split.style.gridTemplateColumns = `${leftPx}px 6px 1fr`;
+        $split.style.gridTemplateRows = '1fr';
+      } else {
+        // Mode vertical (lignes)
+        if (rect.height <= 0) return;
+        const minTop = 80;
+        const minBottom = 120;
+        const topPx = Math.max(minTop, Math.min(rect.height - minBottom, Math.round(rect.height * ratio)));
+        $split.style.gridTemplateRows = `${topPx}px 6px 1fr`;
+        $split.style.gridTemplateColumns = '1fr';
+      }
     }
+
     function restore() {
-      const r = parseFloat(localStorage.getItem(STORAGE_KEY) || '0.56');
+      const wide = isWideLayout();
+      const key = wide ? STORAGE_KEY_COLS : STORAGE_KEY_ROWS;
+      const defaultRatio = wide ? 0.56 : 0.56;
+      const r = parseFloat(localStorage.getItem(key) || String(defaultRatio));
       if (isFinite(r) && r > 0 && r < 1) applyByRatio(r);
     }
+
     $rowResizer.addEventListener('mousedown', (ev) => {
       ev.preventDefault();
       const rect = $split.getBoundingClientRect();
-      const topRect = $split.children[0].getBoundingClientRect();
-      drag = { startY: ev.clientY, rectH: rect.height, topStart: topRect.height };
+      const listRect = $split.children[0].getBoundingClientRect();
+      const wide = isWideLayout();
+      drag = {
+        startX: ev.clientX,
+        startY: ev.clientY,
+        rectW: rect.width,
+        rectH: rect.height,
+        listStartWidth: listRect.width,
+        listStartHeight: listRect.height,
+        isWide: wide
+      };
       document.body.style.userSelect = 'none';
     });
+
     window.addEventListener('mousemove', (ev) => {
       if (!drag) return;
-      const dy = ev.clientY - drag.startY;
-      const topPx = Math.max(80, Math.min(drag.rectH - 120, drag.topStart + dy));
-      $split.style.gridTemplateRows = `${topPx}px 6px 1fr`;
-      const ratio = topPx / drag.rectH;
-      try { localStorage.setItem(STORAGE_KEY, String(ratio)); } catch {}
+
+      if (drag.isWide) {
+        // Mode horizontal
+        const dx = ev.clientX - drag.startX;
+        const leftPx = Math.max(200, Math.min(drag.rectW - 300, drag.listStartWidth + dx));
+        $split.style.gridTemplateColumns = `${leftPx}px 6px 1fr`;
+        const ratio = leftPx / drag.rectW;
+        try { localStorage.setItem(STORAGE_KEY_COLS, String(ratio)); } catch {}
+      } else {
+        // Mode vertical
+        const dy = ev.clientY - drag.startY;
+        const topPx = Math.max(80, Math.min(drag.rectH - 120, drag.listStartHeight + dy));
+        $split.style.gridTemplateRows = `${topPx}px 6px 1fr`;
+        const ratio = topPx / drag.rectH;
+        try { localStorage.setItem(STORAGE_KEY_ROWS, String(ratio)); } catch {}
+      }
     });
+
     window.addEventListener('mouseup', () => {
       if (!drag) return;
       drag = null;
       document.body.style.userSelect = '';
     });
+
     window.addEventListener('resize', restore);
     // Initial
     restore();

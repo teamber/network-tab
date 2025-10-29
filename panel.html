@@ -33,6 +33,7 @@
       color: var(--text);
       font: 13px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
       -webkit-font-smoothing: antialiased;
+      overflow: hidden;
     }
     .toolbar {
       display: flex; align-items: center; gap: 10px;
@@ -71,7 +72,9 @@
     }
 
     .split {
-      display: grid; grid-template-rows: 56% 6px 1fr; grid-template-columns: 1fr;
+      display: grid;
+      grid-template-rows: 56% 6px 1fr;
+      grid-template-columns: 1fr;
       height: calc(100% - 49px);
     }
     .list-section {
@@ -362,7 +365,14 @@
     .copy-options {
       display: flex;
       align-items: center;
-      flex-wrap: nowrap;
+      justify-content: space-between;
+      width: 100%;
+      gap: 16px;
+    }
+    .copy-options-left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
     }
     .checkbox-wrapper {
       display: flex;
@@ -399,7 +409,6 @@
       cursor: pointer;
       font-weight: 600;
       font-size: 12px;
-      margin-left: auto;
       transition: all 0.2s;
       box-shadow: 0 1px 3px rgba(88, 166, 255, 0.3);
     }
@@ -420,7 +429,7 @@
       transform: none;
     }
     /* Responsive: side-by-side layout for wide screens */
-    @media (min-width: 1024px) {
+    @media (min-width: 768px) {
       .split {
         grid-template-rows: 1fr !important;
         grid-template-columns: var(--sidebar-w) 6px 1fr;
@@ -472,17 +481,19 @@
     <div class="details" id="details">
       <div class="section-header details-header">
         <div class="copy-options">
-          <div class="checkbox-wrapper">
-            <input type="checkbox" id="chkToken">
-            <label for="chkToken">Token</label>
-          </div>
-          <div class="checkbox-wrapper">
-            <input type="checkbox" id="chkPayload" checked>
-            <label for="chkPayload">Payload</label>
-          </div>
-          <div class="checkbox-wrapper">
-            <input type="checkbox" id="chkResponse" checked>
-            <label for="chkResponse">Réponse</label>
+          <div class="copy-options-left">
+            <div class="checkbox-wrapper">
+              <input type="checkbox" id="chkToken">
+              <label for="chkToken">Token</label>
+            </div>
+            <div class="checkbox-wrapper">
+              <input type="checkbox" id="chkPayload" checked>
+              <label for="chkPayload">Payload</label>
+            </div>
+            <div class="checkbox-wrapper">
+              <input type="checkbox" id="chkResponse" checked>
+              <label for="chkResponse">Réponse</label>
+            </div>
           </div>
           <button id="btnCopyCustom" class="copy-btn" disabled>Copier</button>
         </div>

@@ -13,11 +13,7 @@
       'Teamber Réseau',
       'icon48.png',
       'panel.html'
-    ).then && b.devtools.panels.create(
-      'Teamber Réseau',
-      'icon48.png',
-      'panel.html'
-    ); // Firefox renvoie une Promise, Chrome un Panel. Cet appel double est toléré par Firefox, ignoré sinon.
+    );
 
   } catch (e) {
     console.error('[Teamber Réseau] Erreur création du panneau:', e);
