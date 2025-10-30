@@ -315,18 +315,28 @@
     state.filter = String(val || '').trim().toLowerCase();
     renderRows();
   }
-
+  
   function addEntryFromRaw(raw) {
     // Normaliser les champs depuis un HAR-like
     const req = raw && raw.request ? raw.request : raw._request || raw;
     const res = raw && raw.response ? raw.response : raw._response || {};
-
+    
     const url = (req && (req.url || (req.headers && req.headers.Referer))) || '(inconnu)';
     const method = (req && req.method) || 'GET';
     const status = (res && (res.status || res.statusCode)) || 0;
     const timeMs = (typeof raw.time === 'number') ? raw.time : (raw._timings && raw._timings.time) || 0;
     const started = raw.startedDateTime ? new Date(raw.startedDateTime) : new Date();
-
+    
+    // Debug sur Chrome pour les POST
+    const isChrome = typeof chrome !== 'undefined' && !browser;
+    if (isChrome && method === 'POST') {
+      console.log('[Teamber Réseau] Ajout POST:', {
+        url: url.substring(0, 80),
+        hasPostData: !!(req && req.postData),
+        postDataPreview: req && req.postData && req.postData.text ? req.postData.text.substring(0, 50) + '...' : 'none'
+      });
+    }
+    
     const entry = {
       id: idSeq++,
       url,
@@ -338,11 +348,12 @@
       response: res || {},
       raw
     };
-
+    
     state.entries.push(entry);
     if (state.entries.length > MAX_ROWS) state.entries.shift();
     renderRows();
   }
+
 
   function renderRows() {
     const f = state.filter;
@@ -1407,33 +1418,34 @@
       console.warn('[Teamber Réseau] Impossible de charger les requêtes HAR:', e);
     }
   }
-
+  
   // Écoute des requêtes réseau DevTools + nettoyage à la navigation/rafraîchissement
   try {
-    // Nouvelles requêtes
+    // Nouvelles requêtes - Sur Chrome, onRequestFinished ne capture pas toujours les POST correctement
     b.devtools.network.onRequestFinished.addListener((request) => {
       try {
+        // Sur Chrome, privilégier HAR pour les POST qui est plus complet
+        if (isChrome && request.request && request.request.method === 'POST') {
+          // Vérifier si on a le postData
+          if (!request.request.postData || !request.request.postData.text) {
+            console.warn('[Teamber Réseau] POST sans body via onRequestFinished, HAR le capturera');
+            return; // On laissera le polling HAR le capturer
+          } else {
+            console.log('[Teamber Réseau] POST avec body via onRequestFinished');
+          }
+        }
         addEntryFromRaw(request); // On conserve l'objet raw pour getContent() plus tard
       } catch (e) {
         console.error('[Teamber Réseau] addEntryFromRaw error:', e);
       }
     });
-
+    
     // Effacer l'historique quand la page est rechargée/naviguée
     if (b.devtools.network.onNavigated && typeof b.devtools.network.onNavigated.addListener === 'function') {
       b.devtools.network.onNavigated.addListener(() => clearHistory('rafraîchissement'));
     }
   } catch (e) {
     console.error('[Teamber Réseau] onRequestFinished/onNavigated indisponible:', e);
-  }
-
-  // Autre API de navigation (compat Chrome/Firefox): inspectedWindow.onNavigated
-  try {
-    if (b.devtools.inspectedWindow && b.devtools.inspectedWindow.onNavigated && typeof b.devtools.inspectedWindow.onNavigated.addListener === 'function') {
-      b.devtools.inspectedWindow.onNavigated.addListener(() => clearHistory('rafraîchissement'));
-    }
-  } catch (e) {
-    console.error('[Teamber Réseau] inspectedWindow.onNavigated indisponible:', e);
   }
 
   // Initial render
