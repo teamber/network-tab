@@ -68,20 +68,9 @@
     saveRequests();
   }
   
-  // Écouter les requêtes
-  if (b.webRequest) {
-    // Configuration des extraSpecs selon le navigateur
-    const beforeRequestExtraSpecs = ['requestBody'];
-    const sendHeadersExtraSpecs = ['requestHeaders'];
-    
-    // Chrome nécessite 'extraHeaders' pour obtenir tous les headers
-    if (IS_CHROME) {
-      try {
-        sendHeadersExtraSpecs.push('extraHeaders');
-      } catch (e) {
-        console.warn('[Teamber Background] extraHeaders non disponible');
-      }
-    }
+  // Écouter les requêtes - SEULEMENT sur Firefox (webRequest disponible)
+  if (b.webRequest && !IS_CHROME) {
+    console.log('[Teamber Background] Mode Firefox - webRequest activé');
     
     // onBeforeRequest - capture URL, méthode, body
     b.webRequest.onBeforeRequest.addListener(
@@ -99,19 +88,10 @@
           frameId: details.frameId
         };
         
-        // Sur Chrome, requestBody peut être undefined pour les POST
-        if (IS_CHROME && details.method === 'POST') {
-          if (!details.requestBody) {
-            console.log('[Teamber Background] POST sans body capturé:', details.url);
-          } else {
-            console.log('[Teamber Background] POST avec body:', details.url);
-          }
-        }
-        
         pendingRequests.set(details.requestId, requestData);
       },
       { urls: ['<all_urls>'] },
-      beforeRequestExtraSpecs
+      ['requestBody']
     );
     
     // onSendHeaders - capture request headers
@@ -123,7 +103,7 @@
         }
       },
       { urls: ['<all_urls>'] },
-      sendHeadersExtraSpecs
+      ['requestHeaders']
     );
     
     // onHeadersReceived - capture response headers et status
@@ -175,6 +155,8 @@
       },
       { urls: ['<all_urls>'] }
     );
+  } else if (IS_CHROME) {
+    console.log('[Teamber Background] Mode Chrome - webRequest non disponible, utilisation de HAR polling côté panel');
   }
   
   // Construire une entrée HAR à partir des données collectées
@@ -228,9 +210,6 @@
         postDataText = JSON.stringify(data.requestBody.formData);
         requestBodySize = postDataText.length;
       }
-    } else if (IS_CHROME && data.method === 'POST') {
-      // Sur Chrome, si c'est un POST sans body capturé, on l'indique
-      postDataText = '<body not captured by webRequest API - use HAR>';
     }
     
     // Extraire Content-Type du body si possible

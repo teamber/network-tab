@@ -6,8 +6,11 @@
 
 (function() {
   'use strict';
-
+  
+  // Au début du fichier, remplacez la détection de navigateur
   const b = (typeof browser !== 'undefined') ? browser : (typeof chrome !== 'undefined' ? chrome : null);
+  const isChrome = typeof chrome !== 'undefined' && typeof browser === 'undefined';
+  
   if (!b || !b.devtools) {
     console.error('[Teamber Réseau] API devtools indisponible.');
     return;
@@ -17,6 +20,7 @@
   const MAX_ROWS = 200;                 // Limite de la liste
   const MAX_BODY_CHARS = 4000;          // Troncature des bodies
   const GET_CONTENT_TIMEOUT_MS = 2000;  // Timeout best-effort pour getContent()
+  const SLOW_THRESHOLD_MS = 500;        // Au-delà de ce délai, afficher une tortue
   const STORAGE_KEY_COPY_OPTIONS = 'teamber.copy.options';
   const STORAGE_KEY_PRIMARY_COLOR = 'teamber.primary.color';
   const DEFAULT_PRIMARY_COLOR = '#58a6ff';
@@ -316,6 +320,7 @@
     renderRows();
   }
   
+  // Dans addEntryFromRaw (vers ligne 228)
   function addEntryFromRaw(raw) {
     // Normaliser les champs depuis un HAR-like
     const req = raw && raw.request ? raw.request : raw._request || raw;
@@ -327,8 +332,7 @@
     const timeMs = (typeof raw.time === 'number') ? raw.time : (raw._timings && raw._timings.time) || 0;
     const started = raw.startedDateTime ? new Date(raw.startedDateTime) : new Date();
     
-    // Debug sur Chrome pour les POST
-    const isChrome = typeof chrome !== 'undefined' && !browser;
+    // Debug sur Chrome pour les POST (utiliser isChrome défini au début)
     if (isChrome && method === 'POST') {
       console.log('[Teamber Réseau] Ajout POST:', {
         url: url.substring(0, 80),
@@ -353,7 +357,6 @@
     if (state.entries.length > MAX_ROWS) state.entries.shift();
     renderRows();
   }
-
 
   function renderRows() {
     const f = state.filter;
@@ -383,6 +386,7 @@
         case 'method': return String(e.method||'');
         case 'file': return String(getFileFromUrl(e.url||''));
         case 'size': return Number(getSizeFromResponse(e.response));
+        case 'delay': return Number(e.durationMs||0);
         case 'url': return String(e.url||'');
         default: return 0;
       }
@@ -421,6 +425,22 @@
       tdFile.textContent = getFileFromUrl(e.url || '');
       tdFile.title = e.url || '';
 
+      // Delay (duration)
+      const tdDelay = document.createElement('td');
+      tdDelay.className = 'col-delay';
+      const duration = Number(e.durationMs || 0);
+      tdDelay.textContent = fmtTime(duration);
+      tdDelay.title = `${duration} ms` + (duration > SLOW_THRESHOLD_MS ? ' — lent (> 500 ms)' : '');
+      if (duration > SLOW_THRESHOLD_MS) {
+        const turtle = document.createElement('span');
+        turtle.className = 'slow-icon';
+        turtle.setAttribute('aria-label', 'lent');
+        turtle.title = 'Lent (> 500 ms)';
+        turtle.textContent = '🐢';
+        tdDelay.appendChild(document.createTextNode(' '));
+        tdDelay.appendChild(turtle);
+      }
+
       const sizeBytes = getSizeFromResponse(e.response);
       const tdSize = document.createElement('td');
       tdSize.className = 'col-size';
@@ -429,6 +449,7 @@
       tr.appendChild(tdStatus);
       tr.appendChild(tdMethod);
       tr.appendChild(tdFile);
+      tr.appendChild(tdDelay);
       tr.appendChild(tdSize);
 
       tr.addEventListener('click', () => {
@@ -1382,10 +1403,11 @@
   }
 
   // Charger les requêtes existantes au démarrage (fallback pour compatibilité)
+  // Dans loadExistingRequests (vers ligne 991)
   async function loadExistingRequests() {
     // D'abord essayer de charger depuis le background
     await loadRequestsFromBackground();
-
+    
     // Ensuite charger depuis HAR (pour les requêtes capturées par DevTools)
     try {
       if (b.devtools.network && typeof b.devtools.network.getHAR === 'function') {
@@ -1395,15 +1417,16 @@
             else reject(new Error('No HAR data'));
           });
         });
-
+        
         if (har && har.entries && Array.isArray(har.entries)) {
           console.log('[Teamber Réseau] Chargement de', har.entries.length, 'requêtes depuis HAR');
           for (const entry of har.entries) {
             try {
-              // Éviter les doublons en vérifiant l'URL et le timestamp
+              // Éviter les doublons en vérifiant l'URL, la méthode et le timestamp
               const exists = state.entries.some(e =>
                 e.url === entry.request.url &&
-                Math.abs(e.durationMs - (entry.time || 0)) < 10
+                e.method === entry.request.method &&
+                Math.abs(e.durationMs - (entry.time || 0)) < 50
               );
               if (!exists) {
                 addEntryFromRaw(entry);
@@ -1419,6 +1442,250 @@
     }
   }
   
+  // Sur Chrome, activer un fallback robuste via chrome.debugger (CDP) + polling HAR
+  // (utiliser isChrome défini au début)
+  if (isChrome) {
+    console.log('[Teamber Réseau] Mode Chrome détecté, polling HAR activé + debugger fallback');
+
+    // ====== Fallback robuste via chrome.debugger (CDP) pour capturer les POST + bodies ======
+    try {
+      const tabId = b.devtools.inspectedWindow.tabId;
+      const hasDebugger = typeof chrome !== 'undefined' && chrome.debugger && typeof chrome.debugger.attach === 'function';
+      const seenKeys = new Set(); // Déduplication
+      const reqStore = new Map(); // requestId -> { request, response, startedDateTime }
+
+      function headersObjToArray(obj) {
+        const arr = [];
+        if (obj && typeof obj === 'object') {
+          for (const [name, value] of Object.entries(obj)) {
+            arr.push({ name, value });
+          }
+        }
+        return arr;
+      }
+
+      function headerValue(headersArray, name) {
+        try {
+          if (!Array.isArray(headersArray)) return undefined;
+          const n = String(name).toLowerCase();
+          for (const h of headersArray) {
+            if (!h || typeof h.name === 'undefined') continue;
+            if (String(h.name).toLowerCase() === n) return h.value;
+          }
+        } catch {}
+        return undefined;
+      }
+
+      function buildKey(method, url, postLen, status) {
+        return [method||'', url||'', String(postLen||0), String(status||0)].join('|');
+      }
+
+      // Helper promisifié pour les commandes CDP
+      function sendCdp(tabId, method, params) {
+        return new Promise((resolve, reject) => {
+          chrome.debugger.sendCommand({ tabId }, method, params || {}, (res) => {
+            if (chrome.runtime.lastError) {
+              return reject(new Error(chrome.runtime.lastError.message || 'CDP error'));
+            }
+            resolve(res);
+          });
+        });
+      }
+
+      if (hasDebugger) {
+        chrome.debugger.attach({ tabId }, '1.3', () => {
+          if (chrome.runtime.lastError) {
+            console.warn('[Teamber Réseau] chrome.debugger.attach erreur:', chrome.runtime.lastError.message);
+            return;
+          }
+          console.log('[Teamber Réseau] chrome.debugger attach OK sur tabId', tabId);
+
+          chrome.debugger.sendCommand({ tabId }, 'Network.enable', {}, () => {
+            if (chrome.runtime.lastError) {
+              console.warn('[Teamber Réseau] Network.enable erreur:', chrome.runtime.lastError.message);
+              return;
+            }
+            console.log('[Teamber Réseau] Network.enable OK');
+            // Désactiver le cache et bypass Service Worker pour garantir la disponibilité du body
+            chrome.debugger.sendCommand({ tabId }, 'Network.setCacheDisabled', { cacheDisabled: true }, () => {
+              if (chrome.runtime.lastError) {
+                console.warn('[Teamber Réseau] setCacheDisabled erreur:', chrome.runtime.lastError.message);
+              } else {
+                console.log('[Teamber Réseau] Cache réseau désactivé pendant l\'ouverture du panneau');
+              }
+            });
+            chrome.debugger.sendCommand({ tabId }, 'Network.setBypassServiceWorker', { bypass: true }, () => {
+              if (chrome.runtime.lastError) {
+                console.warn('[Teamber Réseau] setBypassServiceWorker erreur:', chrome.runtime.lastError.message);
+              } else {
+                console.log('[Teamber Réseau] Service Worker bypass pendant l\'ouverture du panneau');
+              }
+            });
+          });
+
+          chrome.debugger.onEvent.addListener((source, method, params) => {
+            if (!source || source.tabId !== tabId) return;
+
+            // Loading failed: nettoyer et tracer
+            if (method === 'Network.loadingFailed' && params && params.requestId) {
+              const st = reqStore.get(params.requestId);
+              if (st) {
+                console.warn('[Teamber Réseau][CDP] loadingFailed:', params.errorText || params.canceled || params.type, st.request && st.request.url);
+                reqStore.delete(params.requestId);
+              }
+              return;
+            }
+
+            // Request
+            if (method === 'Network.requestWillBeSent' && params && params.request) {
+              const req = params.request;
+              const startedDateTime = new Date();
+              const startTs = typeof params.timestamp === 'number' ? params.timestamp : (Date.now() / 1000);
+              const request = {
+                url: req.url,
+                method: req.method,
+                headers: headersObjToArray(req.headers),
+                postData: req.postData ? { text: String(req.postData) } : undefined
+              };
+              const entry = { request, response: {}, startedDateTime, startTs };
+              reqStore.set(params.requestId, entry);
+              if (request.method === 'POST') {
+                console.log('[Teamber Réseau][CDP] requestWillBeSent POST', request.url);
+              }
+            }
+
+            // Response headers + status
+            if (method === 'Network.responseReceived' && params && params.response) {
+              const st = reqStore.get(params.requestId);
+              const resp = params.response;
+              if (st) {
+                st.response = {
+                  status: resp.status || 0,
+                  statusText: resp.statusText || '',
+                  headers: headersObjToArray(resp.headers),
+                  content: { mimeType: resp.mimeType || '' }
+                };
+              }
+            }
+
+            // Body when finished
+            if (method === 'Network.loadingFinished' && params && params.requestId) {
+              const st = reqStore.get(params.requestId);
+              if (!st) return;
+
+              const endTs = typeof params.timestamp === 'number' ? params.timestamp : (Date.now() / 1000);
+              const durationMs = st.startTs ? Math.max(0, Math.round((endTs - st.startTs) * 1000)) : 0;
+              const encodedLen = typeof params.encodedDataLength === 'number' ? params.encodedDataLength : 0;
+
+              chrome.debugger.sendCommand({ tabId }, 'Network.getResponseBody', { requestId: params.requestId }, (bodyRes) => {
+                if (chrome.runtime.lastError) {
+                  console.warn('[Teamber Réseau] getResponseBody erreur:', chrome.runtime.lastError.message);
+                }
+                let text = '';
+                let base64 = false;
+                if (bodyRes) {
+                  base64 = !!bodyRes.base64Encoded;
+                  text = base64 ? atob(bodyRes.body || '') : (bodyRes.body || '');
+                }
+
+                // Toujours avoir un objet réponse
+                if (!st.response) {
+                  st.response = { status: 0, headers: [], content: {} };
+                }
+                st.response.content = st.response.content || {};
+                st.response.content.text = text;
+                // Taille: priorité encodedDataLength; fallback Content-Length; sinon longueur du texte
+                let headerLen = 0;
+                try {
+                  const cl = headerValue(st.response.headers, 'content-length');
+                  const parsed = cl != null ? parseInt(String(cl), 10) : 0;
+                  headerLen = Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+                } catch {}
+                const contentSize = encodedLen > 0 ? encodedLen : (headerLen > 0 ? headerLen : (typeof text === 'string' ? text.length : 0));
+                st.response.content.size = contentSize;
+                st.response._transferSize = contentSize;
+
+                // Construire un objet type HAR minimal et injecter
+                const raw = {
+                  startedDateTime: st.startedDateTime.toISOString(),
+                  time: durationMs,
+                  request: st.request,
+                  response: st.response,
+                  _initiator: { type: 'other' }
+                };
+
+                // Ajouter un shim getContent pour compatibilité ensureResponseBody()
+                raw.getContent = function(cb) {
+                  const result = { text: text, encoding: base64 ? 'base64' : 'utf-8' };
+                  if (typeof cb === 'function') {
+                    try { cb(result.text, result.encoding); } catch (_) {}
+                    return;
+                  }
+                  return Promise.resolve(result);
+                };
+
+                const postLen = st.request && st.request.postData && st.request.postData.text ? st.request.postData.text.length : 0;
+                const key = buildKey(st.request.method, st.request.url, postLen, st.response && st.response.status);
+                if (!seenKeys.has(key)) {
+                  seenKeys.add(key);
+                  addEntryFromRaw(raw);
+                }
+
+                // Nettoyer la mémoire
+                reqStore.delete(params.requestId);
+              });
+            }
+          });
+
+          // Détacher quand le panneau se ferme
+          window.addEventListener('unload', () => {
+            try { chrome.debugger.detach({ tabId }); } catch {}
+          });
+        });
+      } else {
+        console.warn('[Teamber Réseau] chrome.debugger indisponible — reliance sur HAR polling uniquement');
+      }
+    } catch (e) {
+      console.warn('[Teamber Réseau] Initialisation debugger Chrome échouée:', e);
+    }
+
+    // ====== Polling HAR (toujours actif pour redondance) ======
+    let lastHarSize = 0;
+    setInterval(async () => {
+      try {
+        if (b.devtools.network && typeof b.devtools.network.getHAR === 'function') {
+          const har = await new Promise((resolve, reject) => {
+            b.devtools.network.getHAR((harLog) => {
+              if (harLog) resolve(harLog);
+              else reject(new Error('No HAR data'));
+            });
+          });
+          if (har && har.entries && Array.isArray(har.entries)) {
+            if (har.entries.length > lastHarSize) {
+              const newEntries = har.entries.slice(lastHarSize);
+              console.log('[Teamber Réseau] Nouvelles entrées HAR détectées:', newEntries.length);
+              for (const entry of newEntries) {
+                try {
+                  const exists = state.entries.some(e =>
+                    e.url === entry.request.url &&
+                    e.method === entry.request.method &&
+                    Math.abs(e.durationMs - (entry.time || 0)) < 50
+                  );
+                  if (!exists) addEntryFromRaw(entry);
+                } catch (e) {
+                  console.warn('[Teamber Réseau] Erreur lors du chargement d\'une entrée HAR:', e);
+                }
+              }
+              lastHarSize = har.entries.length;
+            }
+          }
+        }
+      } catch (e) {
+        // Ignorer les erreurs de polling
+      }
+    }, 500); // Vérifier toutes les 500ms
+  }
+
   // Écoute des requêtes réseau DevTools + nettoyage à la navigation/rafraîchissement
   try {
     // Nouvelles requêtes - Sur Chrome, onRequestFinished ne capture pas toujours les POST correctement
@@ -1426,10 +1693,10 @@
       try {
         // Sur Chrome, privilégier HAR pour les POST qui est plus complet
         if (isChrome && request.request && request.request.method === 'POST') {
-          // Vérifier si on a le postData
+          // Même si le body n'est pas présent ici, on ajoute l'entrée immédiatement
+          // afin d'assurer l'affichage des POST. Le polling HAR / CDP complètera ensuite.
           if (!request.request.postData || !request.request.postData.text) {
-            console.warn('[Teamber Réseau] POST sans body via onRequestFinished, HAR le capturera');
-            return; // On laissera le polling HAR le capturer
+            console.warn('[Teamber Réseau] POST sans body via onRequestFinished — ajout immédiat, corps à venir via HAR/CDP');
           } else {
             console.log('[Teamber Réseau] POST avec body via onRequestFinished');
           }

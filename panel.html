@@ -510,7 +510,9 @@
     .col-status.ok { color: var(--ok); font-weight: 600; }
     .col-status.warn { color: var(--warn); font-weight: 600; }
     .col-status.err { color: var(--err); font-weight: 600; }
-    .col-size, .col-initiator, .col-file { color: var(--text-secondary); }
+    .col-size, .col-initiator, .col-file, .col-delay { color: var(--text-secondary); }
+    .col-delay { white-space: nowrap; }
+    .slow-icon { opacity: 0.9; font-size: 12px; vertical-align: middle; }
     .col-file { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
     .section {
@@ -781,12 +783,14 @@
           <col style="width:90px">
           <col>
           <col style="width:90px">
+          <col style="width:90px">
         </colgroup>
         <thead>
           <tr>
             <th class="sortable" data-col="status" style="width: 64px">ETAT</th>
             <th class="sortable" data-col="method" style="width: 90px">METHODE</th>
             <th class="sortable" data-col="file">FICHIER</th>
+            <th class="sortable" data-col="delay" style="width: 90px">Délais</th>
             <th class="sortable" data-col="size" style="width: 90px">Taille</th>
           </tr>
         </thead>

@@ -1,16 +1,15 @@
 {
   "manifest_version": 3,
   "name": "Teamber Réseau",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Panneau DevTools qui clone l'onglet Réseau et ajoute des actions de copie joliment formatées (avec ou sans token).",
   "icons": {
     "48": "icon48.png"
   },
   "permissions": [
     "clipboardWrite",
-    "webRequest",
     "storage",
-    "tabs"
+    "debugger"
   ],
   "host_permissions": [
     "<all_urls>"
